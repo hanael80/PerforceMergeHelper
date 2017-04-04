@@ -1,0 +1,350 @@
+// IntegrateHelper.cpp : Defines the entry point for the console application.
+//
+
+#include "stdafx.h"
+#include <stdlib.h>
+#include <string.h>
+#include <string>
+#include <unordered_map>
+#include <windows.h>
+
+
+#define ENSURE( condition, doWhenFail )                                        \
+if ( !(condition) )                                                            \
+{                                                                              \
+    printf( "[UX+] %s, Error occurred with '%s'.", __FUNCTION__, #condition ); \
+    doWhenFail;                                                                \
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+/// @brief	returns branch mapping between branch1 and branch2
+///
+/// @param	branch1	first branch
+/// @param	branch2	second branch
+/// @param	whether or not it's reserve
+///
+/// @return	branch mapping
+////////////////////////////////////////////////////////////////////////////////////////////////////
+std::string GetBranchMapping( std::string& branch1, std::string& branch2, bool& reserve )
+{
+	if ( branch1 == "JP_Dev" && branch2 == "Trunk" )
+	{
+		std::swap( branch1, branch2 );
+		reserve = true;
+	}
+	else
+	{
+		reserve = false;
+	}
+
+	char buf[ 256 ];
+	sprintf_s( buf, "%s<=>%s", branch1.c_str(), branch2.c_str() );
+
+	return buf;
+}
+
+void SetClipboard( const std::string& s )
+{
+	HWND hwnd = GetDesktopWindow();
+	OpenClipboard( hwnd );
+	EmptyClipboard();
+	HGLOBAL hg = GlobalAlloc( GMEM_MOVEABLE, s.size() + 1 );
+	if ( !hg ) {
+		CloseClipboard();
+		return;
+	}
+	memcpy( GlobalLock( hg ), s.c_str(), s.size() + 1 );
+	GlobalUnlock( hg );
+	SetClipboardData( CF_TEXT, hg );
+	CloseClipboard();
+	GlobalFree( hg );
+}
+
+int main()
+{
+	FILE* configFile = fopen( "config.txt", "r" );
+	if ( !configFile ) return 1;
+
+	char        buf[ 1024 * 100 ];
+	std::string name;
+	std::string perforceHost;
+	int         perforcePort;
+	std::string perforceUserId;
+	std::string perforceUserPw;
+	std::string perforceWorkspace;
+	std::unordered_map< std::string, std::string > branchMap;
+	while ( fgets( buf, sizeof( buf ) - 1, configFile ) )
+	{
+		char* token = strtok( buf, " \t" );
+		if ( !token ) continue;
+
+		if ( !strcmp( token, "name" ) )
+			name = strtok( nullptr, " \t\r\n" );
+		else if ( !strcmp( token, "perforce_host" ) )
+			perforceHost = strtok( nullptr, " \t\r\n" );
+		else if ( !strcmp( token, "perforce_port" ) )
+			perforcePort = atoi( strtok( nullptr, " \t\r\n" ) );
+		else if ( !strcmp( token, "perforce_user_id" ) )
+			perforceUserId = strtok( nullptr, " \t\r\n" );
+		else if ( !strcmp( token, "perforce_user_pw" ) )
+			perforceUserPw = strtok( nullptr, " \t\r\n" );
+		else if ( !strcmp( token, "perforce_workspace" ) )
+			perforceWorkspace = strtok( nullptr, " \t\r\n" );
+		else if ( !strcmp( token, "branch" ) )
+		{
+			std::string branchName = strtok( nullptr, " \t" );
+			std::string branchPath = strtok( nullptr, " \t\r\n" );
+			branchMap[ branchName ] = branchPath;
+		}
+	}
+
+	fclose( configFile );
+
+	printf( "revision : " );
+
+	gets_s( buf );
+
+	int revision = atoi( buf );
+
+	printf( "source branch(def: JP_Dev) : " );
+	gets_s( buf );
+
+	std::string srcBranch;
+	if ( *buf )
+		srcBranch = buf;
+	else
+		srcBranch = "None";
+
+	printf( "target branch(def: JP_Dev) : " );
+	gets_s( buf );
+
+	std::string dstBranch;
+	if ( *buf )
+		dstBranch = buf;
+	else
+		dstBranch = "JP_Dev";
+
+	std::string personName;
+
+	sprintf_s( buf, sizeof( buf ) - 1, "p4 describe -s %d > log.txt", revision );
+	system( buf );
+
+	FILE* logFile = fopen( "log.txt", "r" );
+	ENSURE( logFile, return 1 );
+
+	ENSURE( fgets( buf, sizeof( buf ) - 1, logFile ), return 1 );
+	ENSURE( fgets( buf, sizeof( buf ) - 1, logFile ), return 1 );
+
+	std::string srcComment;
+	std::string comment;
+	char        branchInfo[ 256 ] = "";
+	std::string readBranch = "None";
+	
+	bool revisionCommentProcessed = false;
+	bool ignore                   = false;
+	while ( fgets( buf, sizeof( buf ) - 1, logFile ) )
+	{
+		char* p = strtok( buf, "\r\n" );
+		if ( !p ) continue;
+		if ( !strcmp( p, "Affected files ..." ) )
+			ignore = true;
+
+		srcComment += std::string( "# " ) + p + "\r\n";
+		if ( ignore ) continue;
+
+		if ( readBranch == "None" )
+		{
+			char* p = buf;
+			while ( *p != '[' ) p++;
+			++p;
+
+			char* start = p;
+			while ( *p != ']' ) p++;
+			personName = std::string( start, p - start );
+			++p;
+
+			if ( *p == '[' )
+			{
+				++p;
+				if ( strstr( buf, "=>" ) )
+				{
+					while ( *p != '>' ) p++;
+					while ( *p != ' ' ) p++;
+					++p;
+				}
+				char* end = p;
+				while ( *end != ']' ) end++;
+
+				std::string branchName( p, end - p );
+				readBranch = branchName;
+				ENSURE( readBranch != "None", return 1 );
+
+				if ( srcBranch == "None" )
+					srcBranch = readBranch;
+
+				p = end + 1;
+			}
+			else
+			{
+				srcBranch = "Trunk";
+			}
+
+			p = strtok( p, "\r\n" );
+			if ( !p || !*p ) continue;
+
+			strcpy( buf, p );
+		}
+
+		if ( !revisionCommentProcessed )
+		{
+			revisionCommentProcessed = true;
+
+			if ( char* p = strstr( buf, "- #" ) )
+			{
+				p += 3;
+				while ( *p != ' ' ) p++;
+				++p;
+				comment += p;
+			}
+			else if ( char* p = strstr( buf, "- @" ) )
+			{
+				p += 3;
+				while ( *p != ' ' ) p++;
+				++p;
+				comment += p;
+			}
+			else if ( char* p = strstr( buf, "- " ) )
+			{
+				p += 2;
+				comment += p;
+			}
+			else
+			{
+				comment += (buf + 1);
+			}
+		}
+		else
+		{
+			comment += (buf + 1);
+		}
+
+		comment += "\r\n";
+	}
+
+	//comment[ comment.length() - 1 ] = 0;
+
+	fclose( logFile );
+
+	printf( "old_comment : %s\n", comment.c_str() );
+	printf( "person      : %s\n", personName.c_str() );
+	printf( "src_branch  : %s\n", srcBranch.c_str() );
+	printf( "dst_branch  : %s\n", dstBranch.c_str() );
+	
+	sprintf_s(
+		buf, sizeof( buf ) - 1,
+		"[½Å¼ºÀÏ][%s => %s]\n"
+		"- #%d %s",
+		srcBranch.c_str(), dstBranch.c_str(),
+		revision, comment.c_str() );
+	std::string newComment = buf;
+	printf( "new_comment\n%s\n", newComment.c_str() );
+
+	sprintf_s(
+		buf, sizeof( buf ) - 1,
+		"%s\r\n"
+		"Change: new\r\n\r\n"
+		"Description:\r\n"
+		"\t[%s][%s => %s]\r\n"
+		"\t- #%d %s%s",
+		srcComment.c_str(),
+		name.c_str(),
+		srcBranch.c_str(), dstBranch.c_str(),
+		revision, personName != name ? ("[" + personName + "]").c_str() : "", comment.c_str() );
+	SetClipboard( buf );
+	sprintf_s(
+		buf, sizeof( buf ) - 1,
+		"p4 -C cp949 -c %s -p %s:%d -u %s -P %s change > log.txt",
+		perforceWorkspace.c_str(),
+		perforceHost.c_str(),
+		perforcePort,
+		perforceUserId.c_str(),
+		perforceUserPw.c_str() );
+	system( buf );
+
+	logFile = fopen( "log.txt", "r" );
+	ENSURE( logFile, return 1 );
+	fgets( buf, sizeof( buf ) - 1, logFile );
+	char* p = buf;
+	while ( *p != ' ' ) ++p;
+	++p;
+
+	int newChangeListNo = atoi( p );
+	printf( "newChangeList: %d\n", newChangeListNo );
+	fclose( logFile );
+
+	bool        reserve;
+	std::string branchMapping = GetBranchMapping( srcBranch, dstBranch, reserve );
+
+	sprintf_s(
+		buf, sizeof( buf ) - 1,
+		"p4 -C utf8 -c %s -p %s:%d -u %s -P %s integrate -c %d %s-b \"%s\" -s //depot/%s/...@%d,@%d",
+		perforceWorkspace.c_str(),
+		perforceHost.c_str(),
+		perforcePort,
+		perforceUserId.c_str(),
+		perforceUserPw.c_str(),
+		newChangeListNo,
+		reserve ? "-r " : "",
+		branchMapping.c_str(),
+		branchMap[ srcBranch ].c_str(),
+		revision, revision );
+	printf( buf );
+	system( buf );
+
+	sprintf_s(
+		buf, sizeof( buf ) - 1,
+		"p4 -C utf8 -c %s -p %s:%d -u %s -P %s change -o %d >> log.txt",
+		perforceWorkspace.c_str(),
+		perforceHost.c_str(),
+		perforcePort,
+		perforceUserId.c_str(),
+		perforceUserPw.c_str(),
+		newChangeListNo );
+	system( buf );
+
+	logFile = fopen( "log.txt", "r" );
+	ENSURE( logFile, return 1 );
+	while ( fgets( buf, sizeof( buf ) - 1, logFile ) )
+	{
+		char* p = strtok( buf, "\r\n" );
+		if ( !p ) continue;
+		if ( !strcmp( p, "Files:" ) )
+			break;
+	}
+
+	while ( fgets( buf, sizeof( buf ) - 1, logFile ) )
+	{
+		char* p = strtok( buf, "\t\r\n" );
+		if ( !p ) continue;
+
+		char command[ 256 ];
+		sprintf_s(
+			command, sizeof( command ) - 1,
+			"p4 -C utf8 -c %s -p %s:%d -u %s -P %s resolve -o -am %s",
+			perforceWorkspace.c_str(),
+			perforceHost.c_str(),
+			perforcePort,
+			perforceUserId.c_str(),
+			perforceUserPw.c_str(),
+			p );
+		printf( "%s\n", command );
+		system( command );
+
+	}
+
+	fclose( logFile );
+
+	system( "pause" );
+
+    return 0;
+}
