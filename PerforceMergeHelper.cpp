@@ -16,31 +16,59 @@ if ( !(condition) )                                                            \
     doWhenFail;                                                                \
 }
 
+
+std::string perforceHost;
+int         perforcePort;
+std::string perforceUserId;
+std::string perforceUserPw;
+std::string perforceWorkspace;
+
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 /// @brief	returns branch mapping between branch1 and branch2
 ///
 /// @param	branch1	first branch
 /// @param	branch2	second branch
-/// @param	whether or not it's reserve
+/// @param	whether or not it's reverse
 ///
 /// @return	branch mapping
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-std::string GetBranchMapping( std::string& branch1, std::string& branch2, bool& reserve )
+std::string GetBranchMapping( std::string& branch1, std::string& branch2, bool& reverse )
 {
-	if ( branch1 == "JP_Dev" && branch2 == "Trunk" )
-	{
-		std::swap( branch1, branch2 );
-		reserve = true;
-	}
-	else
-	{
-		reserve = false;
-	}
-
 	char buf[ 256 ];
-	sprintf_s( buf, "%s<=>%s", branch1.c_str(), branch2.c_str() );
+	sprintf_s(
+		buf, sizeof( buf ) - 1,
+		"p4 -C utf8 -c %s -p %s:%d -u %s -P %s branches > log.txt",
+		perforceWorkspace.c_str(),
+		perforceHost.c_str(),
+		perforcePort,
+		perforceUserId.c_str(),
+		perforceUserPw.c_str() );
+	system( buf );
 
-	return buf;
+	std::list< std::string > branchNameList;
+	FILE* file = fopen( "log.txt", "r" );
+	while ( fgets( buf, sizeof( buf ), file ) )
+	{
+		char* token = strtok( buf, " " );
+		char* branchName = strtok( nullptr, " " );
+		branchNameList.push_back( branchName );
+	}
+	fclose( file );
+
+	for ( const std::string& branchName : branchNameList )
+	{
+		std::size_t pos1 = branchName.find( branch1 );
+		if ( pos1 == std::string::npos ) continue;
+
+		std::size_t pos2 = branchName.find( branch2 );
+		if ( pos2 == std::string::npos ) continue;
+
+		reverse = (pos1 > 0);
+		return branchName;
+	}
+
+	return "invalid_branch";
 }
 
 void SetClipboard( const std::string& s )
@@ -67,11 +95,6 @@ int main()
 
 	char        buf[ 1024 * 100 ];
 	std::string name;
-	std::string perforceHost;
-	int         perforcePort;
-	std::string perforceUserId;
-	std::string perforceUserPw;
-	std::string perforceWorkspace;
 	std::unordered_map< std::string, std::string > branchMap;
 	while ( fgets( buf, sizeof( buf ) - 1, configFile ) )
 	{
@@ -282,8 +305,8 @@ int main()
 	printf( "newChangeList: %d\n", newChangeListNo );
 	fclose( logFile );
 
-	bool        reserve;
-	std::string branchMapping = GetBranchMapping( srcBranch, dstBranch, reserve );
+	bool        reverse;
+	std::string branchMapping = GetBranchMapping( srcBranch, dstBranch, reverse );
 
 	sprintf_s(
 		buf, sizeof( buf ) - 1,
@@ -294,11 +317,10 @@ int main()
 		perforceUserId.c_str(),
 		perforceUserPw.c_str(),
 		newChangeListNo,
-		reserve ? "-r " : "",
+		reverse ? "-r " : "",
 		branchMapping.c_str(),
 		branchMap[ srcBranch ].c_str(),
 		revision, revision );
-	printf( buf );
 	system( buf );
 
 	sprintf_s(
@@ -339,7 +361,6 @@ int main()
 			p );
 		printf( "%s\n", command );
 		system( command );
-
 	}
 
 	fclose( logFile );
