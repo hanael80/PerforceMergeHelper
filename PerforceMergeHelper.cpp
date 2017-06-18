@@ -129,14 +129,7 @@ int main()
 
 	int revision = atoi( buf );
 
-	printf( "source branch(def: JP_Dev) : " );
-	gets_s( buf );
-
-	std::string srcBranch;
-	if ( *buf )
-		srcBranch = buf;
-	else
-		srcBranch = "None";
+	std::string srcBranch = "None";
 
 	printf( "target branch(def: JP_Dev) : " );
 	gets_s( buf );
@@ -153,6 +146,27 @@ int main()
 	system( buf );
 
 	FILE* logFile = fopen( "log.txt", "r" );
+	ENSURE( logFile, return 1 );
+
+	while ( fgets( buf, sizeof( buf ) - 1, logFile ) )
+	{
+		if ( !strstr( buf, "... //depot/" ) ) continue;
+
+		for ( auto& pair : branchMap )
+		{
+			if ( strstr( buf, pair.second.c_str() ) )
+			{
+				srcBranch = pair.first;
+				break;
+			}
+		}
+
+		break;
+	}
+
+	ENSURE( srcBranch != "None", return 1 );
+	fclose( logFile );
+	logFile = fopen( "log.txt", "r" );
 	ENSURE( logFile, return 1 );
 
 	ENSURE( fgets( buf, sizeof( buf ) - 1, logFile ), return 1 );
@@ -359,7 +373,6 @@ int main()
 			perforceUserId.c_str(),
 			perforceUserPw.c_str(),
 			p );
-		printf( "%s\n", command );
 		system( command );
 	}
 
