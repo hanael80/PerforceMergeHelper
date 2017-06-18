@@ -279,8 +279,9 @@ int main()
 	
 	sprintf_s(
 		buf, sizeof( buf ) - 1,
-		"[½Å¼ºÀÏ][%s => %s]\n"
+		"[%s][%s => %s]\n"
 		"- #%d %s",
+		name.c_str(),
 		srcBranch.c_str(), dstBranch.c_str(),
 		revision, comment.c_str() );
 	std::string newComment = buf;
