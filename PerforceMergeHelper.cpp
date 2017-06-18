@@ -340,7 +340,7 @@ int main()
 
 	sprintf_s(
 		buf, sizeof( buf ) - 1,
-		"p4 -C utf8 -c %s -p %s:%d -u %s -P %s change -o %d >> log.txt",
+		"p4 -C utf8 -c %s -p %s:%d -u %s -P %s change -o %d > log.txt",
 		perforceWorkspace.c_str(),
 		perforceHost.c_str(),
 		perforcePort,
@@ -359,6 +359,7 @@ int main()
 			break;
 	}
 
+	int autoResolveFailedCount = 0;
 	while ( fgets( buf, sizeof( buf ) - 1, logFile ) )
 	{
 		char* p = strtok( buf, "\t\r\n" );
@@ -367,7 +368,7 @@ int main()
 		char command[ 256 ];
 		sprintf_s(
 			command, sizeof( command ) - 1,
-			"p4 -C utf8 -c %s -p %s:%d -u %s -P %s resolve -o -am %s",
+			"p4 -C utf8 -c %s -p %s:%d -u %s -P %s resolve -o -am %s > log_resolve.txt",
 			perforceWorkspace.c_str(),
 			perforceHost.c_str(),
 			perforcePort,
@@ -375,9 +376,40 @@ int main()
 			perforceUserPw.c_str(),
 			p );
 		system( command );
+
+		FILE* reolveLogFile = fopen( "log_resolve.txt", "r" );
+		ENSURE( reolveLogFile, return 1 );
+		ENSURE( fgets( buf, sizeof( buf ) - 1, reolveLogFile ), return 1 );
+		ENSURE( fgets( buf, sizeof( buf ) - 1, reolveLogFile ), return 1 );
+		bool autoResolved = (strstr( buf, "+ 0 conflicting" ) != nullptr);
+		printf( "autoResolved: %s-%s\n", p, autoResolved ? "success" : "failure" );
+
+		fclose( reolveLogFile );
+
+		if ( !autoResolved )
+			autoResolveFailedCount++;
 	}
 
 	fclose( logFile );
+
+	if ( autoResolveFailedCount )
+	{
+		system( "pause" );
+		return 0;
+	}
+
+	printf( "Summit!\n" );
+
+	sprintf_s(
+		buf, sizeof( buf ) - 1,
+		"p4 -C utf8 -c %s -p %s:%d -u %s -P %s submit -c %d",
+		perforceWorkspace.c_str(),
+		perforceHost.c_str(),
+		perforcePort,
+		perforceUserId.c_str(),
+		perforceUserPw.c_str(),
+		newChangeListNo );
+	system( buf );
 
 	system( "pause" );
 
