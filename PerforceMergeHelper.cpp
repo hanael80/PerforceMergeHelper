@@ -272,6 +272,7 @@ int main()
 
 	std::string srcComment;
 	std::string comment;
+	std::list< std::string > commentList;
 	char        branchInfo[ 256 ] = "";
 	std::string readBranch = "None";
 	
@@ -341,6 +342,7 @@ int main()
 				while ( *p != ' ' ) p++;
 				++p;
 				comment += p;
+				commentList.push_back( p );
 			}
 			else if ( char* p = strstr( buf, "- @" ) )
 			{
@@ -348,20 +350,24 @@ int main()
 				while ( *p != ' ' ) p++;
 				++p;
 				comment += p;
+				commentList.push_back( p );
 			}
 			else if ( char* p = strstr( buf, "- " ) )
 			{
 				p += 2;
 				comment += p;
+				commentList.push_back( p );
 			}
 			else
 			{
 				comment += (buf + 1);
+				commentList.push_back( buf + 1 );
 			}
 		}
 		else
 		{
 			comment += (buf + 1);
+			commentList.push_back( buf + 1 );
 		}
 
 		comment += "\r\n";
@@ -417,11 +423,21 @@ int main()
 		"Change: new\r\n\r\n"
 		"Description:\r\n"
 		"\t[%s][%s => %s]\r\n"
-		"\t- #%d %s%s",
+		"\t- #%d %s",
 		srcComment.c_str(),
 		name.c_str(),
 		srcBranch.c_str(), dstBranch.c_str(),
-		revision, personName != name ? ("[" + personName + "]").c_str() : "", comment.c_str() );
+		revision, personName != name ? ("[" + personName + "]").c_str() : "" );
+
+	int lineIndex = 0;
+	for ( const std::string& commentLine : commentList )
+	{
+		if ( lineIndex++ > 0 )
+			strcat_s( buf, sizeof( buf ) - 1, "\r\n\t" );
+
+		strcat_s( buf, sizeof( buf ) - 1, commentLine.c_str() );
+	}
+
 	SetClipboard( buf );
 	sprintf_s(
 		buf, sizeof( buf ) - 1,
