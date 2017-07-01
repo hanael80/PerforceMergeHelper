@@ -2,6 +2,7 @@
 //
 
 #include "stdafx.h"
+#include <map>
 #include <stdlib.h>
 #include <string.h>
 #include <string>
@@ -22,6 +23,7 @@ int         perforcePort;
 std::string perforceUserId;
 std::string perforceUserPw;
 std::string perforceWorkspace;
+int         mode;
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -38,12 +40,12 @@ std::string GetBranchMapping( std::string& branch1, std::string& branch2, bool& 
 	char buf[ 256 ];
 	sprintf_s(
 		buf, sizeof( buf ) - 1,
-		"p4 -C utf8 -c %s -p %s:%d -u %s -P %s branches > log.txt",
-		perforceWorkspace.c_str(),
-		perforceHost.c_str(),
-		perforcePort,
-		perforceUserId.c_str(),
-		perforceUserPw.c_str() );
+		"p4 -C cp949 -c %s -p %s:%d -u %s -P %s branches > log.txt",
+	perforceWorkspace.c_str(),
+	perforceHost.c_str(),
+	perforcePort,
+	perforceUserId.c_str(),
+	perforceUserPw.c_str() );
 	system( buf );
 
 	std::list< std::string > branchNameList;
@@ -88,6 +90,79 @@ void SetClipboard( const std::string& s )
 	GlobalFree( hg );
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////
+/// @brief	searches revisions which contain a specific text
+///
+/// @return	no return
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void search()
+{
+	printf( "folder: " );
+	char buf[ 1024 * 100 ];
+	gets_s( buf );
+	std::string folder = buf;
+
+	printf( "keyword: " );
+	gets_s( buf );
+
+	std::string keyword = buf;
+
+	sprintf_s( buf, sizeof( buf ) - 1, "p4 -C cp949 changes -s submitted -l -m 3000 //depot/%s... > log.txt", folder.c_str() );
+	system( buf );
+
+	FILE* logFile = fopen( "log.txt", "r" );
+	ENSURE( logFile, return );
+
+	int         readMode = 1;
+	int         revision;
+	std::string comment;
+	bool        properRevision;
+
+	std::map< int, std::string > revisionMap;
+	while ( fgets( buf, sizeof( buf ) - 1, logFile ) )
+	{
+		switch ( readMode )
+		{
+		case 1:
+			{
+				char* p = strtok( buf, " " );
+				ENSURE( !strcmp( p, "Change" ), return );
+
+				p = strtok( nullptr, " " );
+				revision = atoi( p );
+				ENSURE( fgets( buf, sizeof( buf ) - 1, logFile ), return );
+				readMode = 2;
+				comment = "";
+				properRevision = false;
+			}
+			break;
+		case 2:
+			{
+				if ( *buf != '\t' )
+				{
+					if ( properRevision )
+						revisionMap[ revision ] = comment;
+
+					readMode = 1;
+					break;
+				}
+
+				comment += buf;
+				if ( strstr( buf, keyword.c_str() ) )
+					properRevision = true;
+			}
+			break;
+		}
+	}
+
+	for ( auto& pair : revisionMap )
+	{
+		printf( "-------------------------------------------------------------\n" );
+		printf( "revision: %d\n", pair.first );
+		printf( "%s\n", pair.second.c_str() );
+	}
+}
+
 int main()
 {
 	FILE* configFile = fopen( "config.txt", "r" );
@@ -123,11 +198,34 @@ int main()
 
 	fclose( configFile );
 
+	printf( "mode(1: search, 2: merge 3: search&merge) : " );
+	gets_s( buf );
+	int mode = atoi( buf );
+	if ( mode == 1 || mode == 3 )
+	{
+		search();
+		if ( mode == 1 )
+		{
+			system( "pause" );
+			return 0;
+		}
+	}
+
 	printf( "revision : " );
 
 	gets_s( buf );
 
-	int revision = atoi( buf );
+	int  revision;
+	bool testMode = false;
+	if ( !strstr( buf, "/test" ) )
+	{
+		revision = atoi( buf );
+	}
+	else
+	{
+		revision = atoi( strtok( buf, "/ " ) );
+		testMode = true;
+	}
 
 	std::string srcBranch = "None";
 
@@ -142,7 +240,7 @@ int main()
 
 	std::string personName;
 
-	sprintf_s( buf, sizeof( buf ) - 1, "p4 describe -s %d > log.txt", revision );
+	sprintf_s( buf, sizeof( buf ) - 1, "p4 -C cp949 describe -s %d > log.txt", revision );
 	system( buf );
 
 	FILE* logFile = fopen( "log.txt", "r" );
@@ -223,7 +321,8 @@ int main()
 			}
 			else
 			{
-				srcBranch = "Trunk";
+				readBranch = "Trunk";
+				srcBranch  = "Trunk";
 			}
 
 			p = strtok( p, "\r\n" );
@@ -277,6 +376,31 @@ int main()
 	printf( "src_branch  : %s\n", srcBranch.c_str() );
 	printf( "dst_branch  : %s\n", dstBranch.c_str() );
 	
+	bool        reverse;
+	std::string branchMapping = GetBranchMapping( srcBranch, dstBranch, reverse );
+
+	if ( testMode )
+	{
+		sprintf_s(
+			buf, sizeof( buf ) - 1,
+			"p4 -C cp949 -c %s -p %s:%d -u %s -P %s integrate %s%s-b \"%s\" -s //depot/%s/...@%d,@%d",
+			perforceWorkspace.c_str(),
+			perforceHost.c_str(),
+			perforcePort,
+			perforceUserId.c_str(),
+			perforceUserPw.c_str(),
+			reverse ? "-r " : "",
+			testMode ? "-n " : "",
+			branchMapping.c_str(),
+			branchMap[ srcBranch ].c_str(),
+			revision, revision );
+
+		system( buf );
+		system( "pause" );
+
+		return 0;
+	}
+
 	sprintf_s(
 		buf, sizeof( buf ) - 1,
 		"[%s][%s => %s]\n"
@@ -320,12 +444,9 @@ int main()
 	printf( "newChangeList: %d\n", newChangeListNo );
 	fclose( logFile );
 
-	bool        reverse;
-	std::string branchMapping = GetBranchMapping( srcBranch, dstBranch, reverse );
-
 	sprintf_s(
 		buf, sizeof( buf ) - 1,
-		"p4 -C utf8 -c %s -p %s:%d -u %s -P %s integrate -c %d %s-b \"%s\" -s //depot/%s/...@%d,@%d",
+		"p4 -C cp949 -c %s -p %s:%d -u %s -P %s integrate -c %d %s-b \"%s\" -s //depot/%s/...@%d,@%d",
 		perforceWorkspace.c_str(),
 		perforceHost.c_str(),
 		perforcePort,
@@ -340,7 +461,7 @@ int main()
 
 	sprintf_s(
 		buf, sizeof( buf ) - 1,
-		"p4 -C utf8 -c %s -p %s:%d -u %s -P %s change -o %d > log.txt",
+		"p4 -C cp949 -c %s -p %s:%d -u %s -P %s change -o %d > log.txt",
 		perforceWorkspace.c_str(),
 		perforceHost.c_str(),
 		perforcePort,
@@ -368,7 +489,7 @@ int main()
 		char command[ 256 ];
 		sprintf_s(
 			command, sizeof( command ) - 1,
-			"p4 -C utf8 -c %s -p %s:%d -u %s -P %s resolve -o -am %s > log_resolve.txt",
+			"p4 -C cp949 -c %s -p %s:%d -u %s -P %s resolve -o -am %s > log_resolve.txt",
 			perforceWorkspace.c_str(),
 			perforceHost.c_str(),
 			perforcePort,
@@ -398,11 +519,14 @@ int main()
 		return 0;
 	}
 
-	printf( "Summit!\n" );
+	printf( "no conflicts! summit?(y/n) " );
+	gets_s( buf );
+
+	if ( strcmp( buf, "y" ) ) return 0;
 
 	sprintf_s(
 		buf, sizeof( buf ) - 1,
-		"p4 -C utf8 -c %s -p %s:%d -u %s -P %s submit -c %d",
+		"p4 -C cp949 -c %s -p %s:%d -u %s -P %s submit -c %d",
 		perforceWorkspace.c_str(),
 		perforceHost.c_str(),
 		perforcePort,
