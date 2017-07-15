@@ -208,6 +208,21 @@ void search()
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+/// @brief	views revision
+///
+/// @return	no returns
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void view_revision()
+{
+	printf( "revision: " );
+	char buf[ 1024 * 100 ];
+	gets_s( buf );
+	int revision = atoi( buf );
+	sprintf_s( buf, sizeof( buf ) - 1, "p4vc change %d", revision );
+	system( buf );
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
 /// @brief	main function
 ///
 /// @return	exit code
@@ -220,7 +235,7 @@ int main()
 	if ( !read_config( name, branchMap ) ) return 1;
 
 	char buf[ 1024 * 100 ];
-	printf( "mode(1: search, 2: merge, 3: search&merge) : " );
+	printf( "mode(1: search, 2: merge, 3: search&merge, 4: revision) : " );
 	gets_s( buf );
 	int mode = atoi( buf );
 	switch ( mode )
@@ -236,6 +251,11 @@ int main()
 			}
 		}
 		break;
+	case 4:
+		{
+			view_revision();
+		}
+		return 0;
 	}
 
 	printf( "revision : " );
