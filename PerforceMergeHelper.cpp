@@ -73,6 +73,50 @@ std::string GetBranchMapping( std::string& branch1, std::string& branch2, bool& 
 	return "invalid_branch";
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////
+/// @brief	reads config
+///
+/// @param	name		name of user
+/// @param	branchMap	map of branches
+///
+/// @return	success or failure
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool ReadConfig( std::string& name, std::unordered_map< std::string, std::string >& branchMap )
+{
+	FILE* configFile = fopen( "config.txt", "r" );
+	if ( !configFile ) return false;
+
+	char buf[ 1024 * 100 ];
+	while ( fgets( buf, sizeof( buf ) - 1, configFile ) )
+	{
+		char* token = strtok( buf, " \t" );
+		if ( !token ) continue;
+
+		if ( !strcmp( token, "name" ) )
+			name = strtok( nullptr, " \t\r\n" );
+		else if ( !strcmp( token, "perforce_host" ) )
+			perforceHost = strtok( nullptr, " \t\r\n" );
+		else if ( !strcmp( token, "perforce_port" ) )
+			perforcePort = atoi( strtok( nullptr, " \t\r\n" ) );
+		else if ( !strcmp( token, "perforce_user_id" ) )
+			perforceUserId = strtok( nullptr, " \t\r\n" );
+		else if ( !strcmp( token, "perforce_user_pw" ) )
+			perforceUserPw = strtok( nullptr, " \t\r\n" );
+		else if ( !strcmp( token, "perforce_workspace" ) )
+			perforceWorkspace = strtok( nullptr, " \t\r\n" );
+		else if ( !strcmp( token, "branch" ) )
+		{
+			std::string branchName = strtok( nullptr, " \t" );
+			std::string branchPath = strtok( nullptr, " \t\r\n" );
+			branchMap[ branchName ] = branchPath;
+		}
+	}
+
+	fclose( configFile );
+
+	return true;
+}
+
 void SetClipboard( const std::string& s )
 {
 	HWND hwnd = GetDesktopWindow();
@@ -170,39 +214,12 @@ void search()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int main()
 {
-	FILE* configFile = fopen( "config.txt", "r" );
-	if ( !configFile ) return 1;
-
-	char        buf[ 1024 * 100 ];
 	std::string name;
 	std::unordered_map< std::string, std::string > branchMap;
-	while ( fgets( buf, sizeof( buf ) - 1, configFile ) )
-	{
-		char* token = strtok( buf, " \t" );
-		if ( !token ) continue;
 
-		if ( !strcmp( token, "name" ) )
-			name = strtok( nullptr, " \t\r\n" );
-		else if ( !strcmp( token, "perforce_host" ) )
-			perforceHost = strtok( nullptr, " \t\r\n" );
-		else if ( !strcmp( token, "perforce_port" ) )
-			perforcePort = atoi( strtok( nullptr, " \t\r\n" ) );
-		else if ( !strcmp( token, "perforce_user_id" ) )
-			perforceUserId = strtok( nullptr, " \t\r\n" );
-		else if ( !strcmp( token, "perforce_user_pw" ) )
-			perforceUserPw = strtok( nullptr, " \t\r\n" );
-		else if ( !strcmp( token, "perforce_workspace" ) )
-			perforceWorkspace = strtok( nullptr, " \t\r\n" );
-		else if ( !strcmp( token, "branch" ) )
-		{
-			std::string branchName = strtok( nullptr, " \t" );
-			std::string branchPath = strtok( nullptr, " \t\r\n" );
-			branchMap[ branchName ] = branchPath;
-		}
-	}
+	if ( !ReadConfig( name, branchMap ) ) return 1;
 
-	fclose( configFile );
-
+	char buf[ 1024 * 100 ];
 	printf( "mode(1: search, 2: merge 3: search&merge) : " );
 	gets_s( buf );
 	int mode = atoi( buf );
