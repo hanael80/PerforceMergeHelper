@@ -81,7 +81,7 @@ std::string GetBranchMapping( std::string& branch1, std::string& branch2, bool& 
 ///
 /// @return	success or failure
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool ReadConfig( std::string& name, std::unordered_map< std::string, std::string >& branchMap )
+bool read_config( std::string& name, std::unordered_map< std::string, std::string >& branchMap )
 {
 	FILE* configFile = fopen( "config.txt", "r" );
 	if ( !configFile ) return false;
@@ -217,20 +217,25 @@ int main()
 	std::string name;
 	std::unordered_map< std::string, std::string > branchMap;
 
-	if ( !ReadConfig( name, branchMap ) ) return 1;
+	if ( !read_config( name, branchMap ) ) return 1;
 
 	char buf[ 1024 * 100 ];
-	printf( "mode(1: search, 2: merge 3: search&merge) : " );
+	printf( "mode(1: search, 2: merge, 3: search&merge) : " );
 	gets_s( buf );
 	int mode = atoi( buf );
-	if ( mode == 1 || mode == 3 )
+	switch ( mode )
 	{
-		search();
-		if ( mode == 1 )
+	case 1:
+	case 3:
 		{
-			system( "pause" );
-			return 0;
+			search();
+			if ( mode == 1 )
+			{
+				system( "pause" );
+				return 0;
+			}
 		}
+		break;
 	}
 
 	printf( "revision : " );
