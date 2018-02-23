@@ -223,6 +223,42 @@ void view_revision()
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+/// @brief	test integration
+///
+/// @param	reverse			use branch mapping direction in reverse
+/// @param	branchMapping	name of branch mapping
+/// @param	branchMap		map of branches
+/// @param	srcBranch		name of source branch
+/// @param	revision		revision number
+///
+/// @return	no returns
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void test_integration(
+	      bool                                            reverse,
+	const std::string&                                    branchMapping,
+	      std::unordered_map< std::string, std::string >& branchMap,
+	const std::string&                                    srcBranch,
+	      int                                             revision )
+{
+	char buf[ 1024 * 10 ];
+	sprintf_s(
+		buf, sizeof( buf ) - 1,
+		"p4 -C cp949 -c %s -p %s:%d -u %s -P %s integrate %s-n -b \"%s\" -s //depot/%s/...@%d,@%d",
+		perforceWorkspace.c_str(),
+		perforceHost.c_str(),
+		perforcePort,
+		perforceUserId.c_str(),
+		perforceUserPw.c_str(),
+		reverse ? "-r " : "",
+		branchMapping.c_str(),
+		branchMap[ srcBranch ].c_str(),
+		revision, revision );
+
+	system( buf );
+	system( "pause" );
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
 /// @brief	main function
 ///
 /// @return	exit code
@@ -434,23 +470,7 @@ int main()
 
 	if ( testMode )
 	{
-		sprintf_s(
-			buf, sizeof( buf ) - 1,
-			"p4 -C cp949 -c %s -p %s:%d -u %s -P %s integrate %s%s-b \"%s\" -s //depot/%s/...@%d,@%d",
-			perforceWorkspace.c_str(),
-			perforceHost.c_str(),
-			perforcePort,
-			perforceUserId.c_str(),
-			perforceUserPw.c_str(),
-			reverse ? "-r " : "",
-			testMode ? "-n " : "",
-			branchMapping.c_str(),
-			branchMap[ srcBranch ].c_str(),
-			revision, revision );
-
-		system( buf );
-		system( "pause" );
-
+		test_integration( reverse, branchMapping, branchMap, srcBranch, revision );
 		return 0;
 	}
 
