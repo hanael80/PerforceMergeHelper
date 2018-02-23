@@ -457,7 +457,7 @@ int main()
 	sprintf_s(
 		buf, sizeof( buf ) - 1,
 		"[%s][%s => %s]\n"
-		"- #%d %s",
+		"- @%d %s",
 		name.c_str(),
 		srcBranch.c_str(), dstBranch.c_str(),
 		revision, comment.c_str() );
@@ -470,7 +470,7 @@ int main()
 		"Change: new\r\n\r\n"
 		"Description:\r\n"
 		"\t[%s][%s => %s]\r\n"
-		"\t- #%d %s",
+		"\t- @%d %s",
 		srcComment.c_str(),
 		name.c_str(),
 		srcBranch.c_str(), dstBranch.c_str(),
@@ -575,9 +575,11 @@ int main()
 	}
 
 	fclose( logFile );
-
+	
 	if ( autoResolveFailedCount )
 	{
+		sprintf_s( buf, sizeof( buf ) - 1, "p4vc submit -c %d", newChangeListNo );
+		system( buf );
 		system( "pause" );
 		return 0;
 	}
