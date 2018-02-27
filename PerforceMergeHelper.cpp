@@ -259,6 +259,64 @@ void test_integration(
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+/// @brief	parse a submitter's name
+///
+/// @param	p	string pointer
+///
+/// @return	submitter's name
+////////////////////////////////////////////////////////////////////////////////////////////////////
+std::string parse_submitter_name( char*& p )
+{
+	while ( *p != '[' ) p++;
+	++p;
+
+	char* start = p;
+	while ( *p != ']' ) p++;
+	++p;
+
+	return std::string( start, p - start - 1 );
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+/// @brief	parse a submitter's name
+///
+/// @param	buf			buffer
+/// @param	p			string pointer after parsing
+/// @param	readBranch	branch name which is read this time
+/// @param	srcBranch	branch name which is determined as a source branch
+///
+/// @return	no returns
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void parse_branch_name( char* buf, char*& p, std::string& readBranch, std::string& srcBranch )
+{
+	if ( *p != '[' )
+	{
+		readBranch = "Trunk";
+		srcBranch  = "Trunk";
+		return;
+	}
+
+	++p;
+	if ( strstr( buf, "=>" ) )
+	{
+		while ( *p != '>' ) p++;
+		while ( *p != ' ' ) p++;
+		++p;
+	}
+	char* end = p;
+	while ( *end != ']' ) end++;
+
+	std::string branchName( p, end - p );
+	readBranch = branchName;
+	ENSURE( readBranch != "None", return );
+
+	if ( srcBranch == "None" )
+		srcBranch = readBranch;
+
+	p = end + 1;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
 /// @brief	main function
 ///
 /// @return	exit code
@@ -358,7 +416,7 @@ int main()
 	std::list< std::string > commentList;
 	char        branchInfo[ 256 ] = "";
 	std::string readBranch = "None";
-	
+
 	bool revisionCommentProcessed = false;
 	bool ignore                   = false;
 	while ( fgets( buf, sizeof( buf ) - 1, logFile ) )
@@ -374,40 +432,8 @@ int main()
 		if ( readBranch == "None" )
 		{
 			char* p = buf;
-			while ( *p != '[' ) p++;
-			++p;
-
-			char* start = p;
-			while ( *p != ']' ) p++;
-			personName = std::string( start, p - start );
-			++p;
-
-			if ( *p == '[' )
-			{
-				++p;
-				if ( strstr( buf, "=>" ) )
-				{
-					while ( *p != '>' ) p++;
-					while ( *p != ' ' ) p++;
-					++p;
-				}
-				char* end = p;
-				while ( *end != ']' ) end++;
-
-				std::string branchName( p, end - p );
-				readBranch = branchName;
-				ENSURE( readBranch != "None", return 1 );
-
-				if ( srcBranch == "None" )
-					srcBranch = readBranch;
-
-				p = end + 1;
-			}
-			else
-			{
-				readBranch = "Trunk";
-				srcBranch  = "Trunk";
-			}
+			personName = parse_submitter_name( p );
+			parse_branch_name( buf, p, readBranch, srcBranch );
 
 			p = strtok( p, "\r\n" );
 			if ( !p || !*p ) continue;
