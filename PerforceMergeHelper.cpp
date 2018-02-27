@@ -317,6 +317,32 @@ void parse_branch_name( char* buf, char*& p, std::string& readBranch, std::strin
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+/// @brief	parse a tag
+///
+/// @param	buf		buffer
+/// @param	p		string pointer after parsing
+/// @param	tag		name of tag
+///
+/// @return	no returns
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void parse_tag( char* buf, char*& p, std::string& tag )
+{
+	if ( *p != '[' )
+	{
+		tag = "";
+		return;
+	}
+
+	++p;
+	char* end = p;
+	while ( *end != ']' ) end++;
+
+	tag = std::string( p, end - p );
+
+	p = end + 1;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
 /// @brief	main function
 ///
 /// @return	exit code
@@ -416,6 +442,7 @@ int main()
 	std::list< std::string > commentList;
 	char        branchInfo[ 256 ] = "";
 	std::string readBranch = "None";
+	std::string tag;
 
 	bool revisionCommentProcessed = false;
 	bool ignore                   = false;
@@ -434,6 +461,8 @@ int main()
 			char* p = buf;
 			personName = parse_submitter_name( p );
 			parse_branch_name( buf, p, readBranch, srcBranch );
+
+			parse_tag( buf, p, tag );
 
 			p = strtok( p, "\r\n" );
 			if ( !p || !*p ) continue;
@@ -500,12 +529,19 @@ int main()
 		return 0;
 	}
 
+	std::string tagPart;
+	if ( !tag.empty() )
+	{
+		sprintf_s( buf, sizeof( buf ) - 1, "[%s]", tag.c_str() );
+		tagPart = buf;
+	}
+
 	sprintf_s(
 		buf, sizeof( buf ) - 1,
-		"[%s][%s => %s]\n"
+		"[%s][%s => %s]%s\n"
 		"- @%d %s",
 		name.c_str(),
-		srcBranch.c_str(), dstBranch.c_str(),
+		srcBranch.c_str(), dstBranch.c_str(), tagPart.c_str(),
 		revision, comment.c_str() );
 	std::string newComment = buf;
 	printf( "new_comment\n%s\n", newComment.c_str() );
@@ -515,11 +551,11 @@ int main()
 		"%s\r\n"
 		"Change: new\r\n\r\n"
 		"Description:\r\n"
-		"\t[%s][%s => %s]\r\n"
+		"\t[%s][%s => %s]%s\r\n"
 		"\t- @%d %s",
 		srcComment.c_str(),
 		name.c_str(),
-		srcBranch.c_str(), dstBranch.c_str(),
+		srcBranch.c_str(), dstBranch.c_str(), tagPart.c_str(),
 		revision, personName != name ? ("[" + personName + "]").c_str() : "" );
 
 	int lineIndex = 0;
