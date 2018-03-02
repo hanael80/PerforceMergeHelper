@@ -350,10 +350,11 @@ void parse_tag( char* buf, char*& p, std::string& tag )
 ///
 /// @param	name		name
 /// @param	branchMap	map of branch
+/// @param	dstBranch	name of dest branch
 ///
 /// @return	result code
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int perform_merge( const std::string& name, BranchMap& branchMap )
+int perform_merge( const std::string& name, BranchMap& branchMap, const std::string& dstBranch )
 {
 	printf( "revision : " );
 
@@ -373,15 +374,6 @@ int perform_merge( const std::string& name, BranchMap& branchMap )
 	}
 
 	std::string srcBranch = "None";
-
-	printf( "target branch(def: JP_Dev) : " );
-	gets_s( buf );
-
-	std::string dstBranch;
-	if ( *buf )
-		dstBranch = buf;
-	else
-		dstBranch = "JP_Dev";
 
 	std::string personName;
 
@@ -699,8 +691,17 @@ int main()
 		return 0;
 	}
 
-	perform_merge( name, branchMap );
-	system( "pause" );
+	printf( "target branch(def: JP_Dev) : " );
+	gets_s( buf );
+
+	std::string dstBranch;
+	if ( *buf )
+		dstBranch = buf;
+	else
+		dstBranch = "JP_Dev";
+
+	while ( true )
+		perform_merge( name, branchMap, dstBranch );
 
     return 0;
 }
