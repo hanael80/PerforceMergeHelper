@@ -25,6 +25,9 @@ std::string perforceUserPw;
 std::string perforceWorkspace;
 int         mode;
 
+/// BranchMap typedef
+typedef std::unordered_map< std::string, std::string > BranchMap;
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 /// @brief	returns branch mapping between branch1 and branch2
@@ -35,7 +38,7 @@ int         mode;
 ///
 /// @return	branch mapping
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-std::string GetBranchMapping( std::string& branch1, std::string& branch2, bool& reverse )
+std::string GetBranchMapping( const std::string& branch1, const std::string& branch2, bool& reverse )
 {
 	char buf[ 256 ];
 	sprintf_s(
@@ -234,11 +237,11 @@ void view_revision()
 /// @return	no returns
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void test_integration(
-	      bool                                            reverse,
-	const std::string&                                    branchMapping,
-	      std::unordered_map< std::string, std::string >& branchMap,
-	const std::string&                                    srcBranch,
-	      int                                             revision )
+	      bool          reverse,
+	const std::string&  branchMapping,
+	      BranchMap&    branchMap,
+	const std::string&  srcBranch,
+	      int           revision )
 {
 	char buf[ 1024 * 10 ];
 	sprintf_s(
@@ -343,43 +346,18 @@ void parse_tag( char* buf, char*& p, std::string& tag )
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-/// @brief	main function
+/// @brief	perform merge
 ///
-/// @return	exit code
+/// @param	name		name
+/// @param	branchMap	map of branch
+///
+/// @return	result code
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int main()
+int perform_merge( const std::string& name, BranchMap& branchMap )
 {
-	std::string name;
-	std::unordered_map< std::string, std::string > branchMap;
-
-	if ( !read_config( name, branchMap ) ) return 1;
-
-	char buf[ 1024 * 100 ];
-	printf( "mode(1: search, 2: merge, 3: search&merge, 4: revision) : " );
-	gets_s( buf );
-	int mode = atoi( buf );
-	switch ( mode )
-	{
-	case 1:
-	case 3:
-		{
-			search();
-			if ( mode == 1 )
-			{
-				system( "pause" );
-				return 0;
-			}
-		}
-		break;
-	case 4:
-		{
-			view_revision();
-		}
-		return 0;
-	}
-
 	printf( "revision : " );
 
+	char buf[ 1024 * 100 ];
 	gets_s( buf );
 
 	int  revision;
@@ -682,6 +660,46 @@ int main()
 		newChangeListNo );
 	system( buf );
 
+	return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+/// @brief	main function
+///
+/// @return	exit code
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int main()
+{
+	std::string name;
+	BranchMap   branchMap;
+
+	if ( !read_config( name, branchMap ) ) return 1;
+
+	char buf[ 1024 * 100 ];
+	printf( "mode(1: search, 2: merge, 3: search&merge, 4: revision) : " );
+	gets_s( buf );
+	int mode = atoi( buf );
+	switch ( mode )
+	{
+	case 1:
+	case 3:
+		{
+			search();
+			if ( mode == 1 )
+			{
+				system( "pause" );
+				return 0;
+			}
+		}
+		break;
+	case 4:
+		{
+			view_revision();
+		}
+		return 0;
+	}
+
+	perform_merge( name, branchMap );
 	system( "pause" );
 
     return 0;
