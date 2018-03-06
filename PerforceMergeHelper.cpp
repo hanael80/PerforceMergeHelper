@@ -350,11 +350,10 @@ void parse_tag( char* buf, char*& p, std::string& tag )
 ///
 /// @param	name		name
 /// @param	branchMap	map of branch
-/// @param	dstBranch	name of dest branch
 ///
 /// @return	result code
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int perform_merge( const std::string& name, BranchMap& branchMap, const std::string& dstBranch )
+int perform_merge( const std::string& name, BranchMap& branchMap )
 {
 	printf( "revision : " );
 
@@ -372,6 +371,15 @@ int perform_merge( const std::string& name, BranchMap& branchMap, const std::str
 		revision = atoi( strtok( buf, "/ " ) );
 		testMode = true;
 	}
+
+	printf( "target branch(def: JP_Dev) : " );
+	gets_s( buf );
+
+	std::string dstBranch;
+	if ( *buf )
+		dstBranch = buf;
+	else
+		dstBranch = "JP_Dev";
 
 	std::string srcBranch = "None";
 
@@ -691,17 +699,8 @@ int main()
 		return 0;
 	}
 
-	printf( "target branch(def: JP_Dev) : " );
-	gets_s( buf );
-
-	std::string dstBranch;
-	if ( *buf )
-		dstBranch = buf;
-	else
-		dstBranch = "JP_Dev";
-
 	while ( true )
-		perform_merge( name, branchMap, dstBranch );
+		perform_merge( name, branchMap );
 
     return 0;
 }
