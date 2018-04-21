@@ -33,6 +33,7 @@ enum class Mode
 {
 	Search,
 	Merge,
+	BulkMerge,
 	SearchAndMerge,
 	Revision,
 	Max
@@ -359,41 +360,26 @@ void parse_tag( char* buf, char*& p, std::string& tag )
 ///
 /// @param	name		name
 /// @param	branchMap	map of branch
+/// @param	revision	number of revision
+/// @param	dstBranch	target branch
+/// @param	testMode	whether or not, it's test mode
+/// @param	autoSubmit	whether or not, automatically submit if there is no conflict
 ///
 /// @return	result code
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int perform_merge( const std::string& name, BranchMap& branchMap )
+int perform_merge(
+	const std::string& name,
+	      BranchMap&   branchMap,
+	      int          revision,
+	const std::string& dstBranch,
+	      bool         testMode,
+	      bool         autoSubmit )
 {
-	printf( "revision : " );
-
-	char buf[ 1024 * 100 ];
-	gets_s( buf );
-
-	int  revision;
-	bool testMode = false;
-	if ( !strstr( buf, "/test" ) )
-	{
-		revision = atoi( buf );
-	}
-	else
-	{
-		revision = atoi( strtok( buf, "/ " ) );
-		testMode = true;
-	}
-
-	printf( "target branch(def: JP_Dev) : " );
-	gets_s( buf );
-
-	std::string dstBranch;
-	if ( *buf )
-		dstBranch = buf;
-	else
-		dstBranch = "JP_Dev";
-
 	std::string srcBranch = "None";
 
 	std::string personName;
 
+	char buf[ 1024 * 100 ];
 	sprintf_s( buf, sizeof( buf ) - 1, "p4 -C cp949 describe -s %d > log.txt", revision );
 	system( buf );
 
@@ -612,7 +598,8 @@ int perform_merge( const std::string& name, BranchMap& branchMap )
 			break;
 	}
 
-	int autoResolveFailedCount = 0;
+	int autoResolveSuccessCount = 0;
+	int autoResolveFailedCount  = 0;
 	while ( fgets( buf, sizeof( buf ) - 1, logFile ) )
 	{
 		char* p = strtok( buf, "\t\r\n" );
@@ -632,15 +619,19 @@ int perform_merge( const std::string& name, BranchMap& branchMap )
 
 		FILE* reolveLogFile = fopen( "log_resolve.txt", "r" );
 		ENSURE( reolveLogFile, return 1 );
-		ENSURE( fgets( buf, sizeof( buf ) - 1, reolveLogFile ), return 1 );
-		ENSURE( fgets( buf, sizeof( buf ) - 1, reolveLogFile ), return 1 );
-		bool autoResolved = (strstr( buf, "+ 0 conflicting" ) != nullptr);
+		bool autoResolved = true;
+		if ( fgets( buf, sizeof( buf ) - 1, reolveLogFile ) )
+		{
+			ENSURE( fgets( buf, sizeof( buf ) - 1, reolveLogFile ), return 1 );
+			autoResolved = (strstr( buf, "+ 0 conflicting" ) != nullptr);
+		}
 		printf( "autoResolved: %s-%s\n", p, autoResolved ? "success" : "failure" );
-
 		fclose( reolveLogFile );
 
 		if ( !autoResolved )
 			autoResolveFailedCount++;
+		else
+			autoResolveSuccessCount++;
 	}
 
 	fclose( logFile );
@@ -653,10 +644,30 @@ int perform_merge( const std::string& name, BranchMap& branchMap )
 		return 0;
 	}
 
-	printf( "no conflicts! summit?(y/n) " );
-	gets_s( buf );
+	if ( !autoSubmit )
+	{
+		printf( "no conflicts! summit?(y/n) " );
+		gets_s( buf );
 
-	if ( strcmp( buf, "y" ) ) return 0;
+		if ( strcmp( buf, "y" ) ) return 0;
+	}
+
+	if ( !autoResolveSuccessCount )
+	{
+		// 삭제
+		sprintf_s(
+			buf, sizeof( buf ) - 1,
+			"p4 -C cp949 -c %s -p %s:%d -u %s -P %s change -d %d",
+			perforceWorkspace.c_str(),
+			perforceHost.c_str(),
+			perforcePort,
+			perforceUserId.c_str(),
+			perforceUserPw.c_str(),
+			newChangeListNo );
+		system( buf );
+
+		return 0;
+	}
 
 	sprintf_s(
 		buf, sizeof( buf ) - 1,
@@ -668,6 +679,180 @@ int perform_merge( const std::string& name, BranchMap& branchMap )
 		perforceUserPw.c_str(),
 		newChangeListNo );
 	system( buf );
+
+	return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+/// @brief	perform merge
+///
+/// @param	name		name
+/// @param	branchMap	map of branch
+///
+/// @return	result code
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int perform_merge( const std::string& name, BranchMap& branchMap )
+{
+	printf( "revision : " );
+
+	char buf[ 1024 * 100 ];
+	gets_s( buf );
+
+	int  revision;
+	bool testMode = false;
+	if ( !strstr( buf, "/test" ) )
+	{
+		revision = atoi( buf );
+	}
+	else
+	{
+		revision = atoi( strtok( buf, "/ " ) );
+		testMode = true;
+	}
+
+	printf( "target branch(def: JP_Dev) : " );
+	gets_s( buf );
+
+	std::string dstBranch;
+	if ( *buf )
+		dstBranch = buf;
+	else
+		dstBranch = "JP_Dev";
+
+	return perform_merge( name, branchMap, revision, dstBranch, testMode, false );
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+/// @brief	perform bulk merge
+///
+/// @param	name		name
+/// @param	branchMap	map of branch
+///
+/// @return	result code
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int perform_bulk_merge( const std::string& name, BranchMap& branchMap )
+{
+	printf( "first revision : " );
+
+	char buf[ 1024 * 100 ];
+	gets_s( buf );
+
+	int  firstRevision;
+	bool testMode = false;
+	if ( !strstr( buf, "/test" ) )
+	{
+		firstRevision = atoi( buf );
+	}
+	else
+	{
+		firstRevision = atoi( strtok( buf, "/ " ) );
+		testMode = true;
+	}
+
+	printf( "source branch : " );
+	gets_s( buf );
+
+	std::string srcBranch = buf;
+
+	printf( "target branch : " );
+	gets_s( buf );
+
+	std::string dstBranch = buf;
+
+	printf( "sub folder : " );
+	gets_s( buf );
+
+	std::string subFolder = buf;
+
+	auto iter = branchMap.find( srcBranch );
+	if ( iter == branchMap.end() )
+	{
+		printf( "invalid branch.\n" );
+		return 1;
+	}
+
+	const std::string& branchFolder = iter->second;
+
+	sprintf_s(
+		buf, sizeof( buf ) - 1,
+		"p4 -C cp949 -c %s -p %s:%d -u %s -P %s changes -t -l \"//depot/%s/%s...@>=%d\" > log.txt",
+		perforceWorkspace.c_str(),
+		perforceHost.c_str(),
+		perforcePort,
+		perforceUserId.c_str(),
+		perforceUserPw.c_str(),
+		branchFolder.c_str(),
+		subFolder.c_str(),
+		firstRevision );
+	system( buf );
+
+	FILE* logFile = fopen( "log.txt", "r" );
+	ENSURE( logFile, return 1 );
+
+	class RevisionInfo
+	{
+	public:
+		int                      num;
+		std::string              date;
+		std::string              comment;
+		std::list< std::string > fileList;
+	};
+
+	enum class ReadMode
+	{
+		Normal,  ///< 일반
+		Comment, ///< 주석
+	};
+
+	ReadMode     readMode = ReadMode::Normal;
+	RevisionInfo curRevision;
+
+	std::list< RevisionInfo > revisionList;
+
+	while ( fgets( buf, sizeof( buf ) - 1, logFile ) )
+	{
+		switch ( readMode )
+		{
+		case ReadMode::Normal:
+		{
+			char* token = strtok( buf, " " );
+			ENSURE( !strcmp( token, "Change" ), return 1 );
+
+			token = strtok( nullptr, " " );
+			curRevision.num = atoi( token );
+			token = strtok( nullptr, " " );
+			token = strtok( nullptr, " " );
+			curRevision.date = token;
+			ENSURE( fgets( buf, sizeof( buf ) - 1, logFile ), return 1 );
+			readMode = ReadMode::Comment;
+			curRevision.comment = "";
+		}
+		break;
+		case ReadMode::Comment:
+		{
+			if ( *buf != '\t' )
+			{
+				readMode = ReadMode::Normal;
+				revisionList.push_back( curRevision );
+				break;
+			}
+
+			curRevision.comment += buf;
+		}
+		break;
+		}
+	}
+
+	fclose( logFile );
+
+	for ( auto iter = revisionList.rbegin(); iter != revisionList.rend(); iter++ )
+	{
+		const RevisionInfo& revisionInfo = *iter;
+		int result = perform_merge( name, branchMap, revisionInfo.num, dstBranch, testMode, true );
+		if ( result ) return result;
+	}
+
+	printf( "OK!\n" );
 
 	return 0;
 }
@@ -685,7 +870,7 @@ int main()
 	if ( !read_config( name, branchMap ) ) return 1;
 
 	char buf[ 1024 * 100 ];
-	printf( "mode(1: search, 2: merge, 3: search&merge, 4: revision) : " );
+	printf( "mode(1: search, 2: merge, 3: bulk merge, 4: search&merge, 5: revision) : " );
 	gets_s( buf );
 	Mode mode = (Mode)( atoi( buf ) - 1 );
 	switch ( mode )
@@ -705,6 +890,11 @@ int main()
 		{
 			while ( true )
 				perform_merge( name, branchMap );
+		}
+		break;
+	case Mode::BulkMerge:
+		{
+			perform_bulk_merge( name, branchMap );
 		}
 		break;
 	case Mode::Revision:
