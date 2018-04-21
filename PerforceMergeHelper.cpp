@@ -29,6 +29,15 @@ int         mode;
 typedef std::unordered_map< std::string, std::string > BranchMap;
 
 
+enum class Mode
+{
+	Search,
+	Merge,
+	SearchAndMerge,
+	Revision,
+	Max
+};
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 /// @brief	returns branch mapping between branch1 and branch2
 ///
@@ -678,29 +687,32 @@ int main()
 	char buf[ 1024 * 100 ];
 	printf( "mode(1: search, 2: merge, 3: search&merge, 4: revision) : " );
 	gets_s( buf );
-	int mode = atoi( buf );
+	Mode mode = (Mode)( atoi( buf ) - 1 );
 	switch ( mode )
 	{
-	case 1:
-	case 3:
+	case Mode::Search:
+	case Mode::SearchAndMerge:
 		{
 			search();
-			if ( mode == 1 )
+			if ( mode == Mode::Search )
 			{
 				system( "pause" );
-				return 0;
+				break;
 			}
 		}
 		break;
-	case 4:
+	case Mode::Merge:
+		{
+			while ( true )
+				perform_merge( name, branchMap );
+		}
+		break;
+	case Mode::Revision:
 		{
 			view_revision();
 		}
-		return 0;
+		break;
 	}
-
-	while ( true )
-		perform_merge( name, branchMap );
 
     return 0;
 }
