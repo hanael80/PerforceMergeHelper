@@ -3,6 +3,7 @@
 
 #include "stdafx.h"
 #include <map>
+#include <set>
 #include <stdlib.h>
 #include <string.h>
 #include <string>
@@ -24,9 +25,13 @@ std::string perforceUserId;
 std::string perforceUserPw;
 std::string perforceWorkspace;
 int         mode;
+bool        utf8Mode = true;
 
 /// BranchMap typedef
 typedef std::unordered_map< std::string, std::string > BranchMap;
+
+/// AccountIgnoreSet typedef
+typedef std::set< std::string > AccountIgnoreSet;
 
 
 enum class Mode
@@ -40,6 +45,81 @@ enum class Mode
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+/// @brief	convert utf8 to ansi string
+///
+/// @param	utf8str	utf string
+///
+/// @return	ansi string
+////////////////////////////////////////////////////////////////////////////////////////////////////
+std::string utf8_to_ansi( const std::string& utf8str )
+{
+	int srcLen = (int)( utf8str.length() );
+    int length = MultiByteToWideChar( CP_UTF8, 0, utf8str.c_str(), srcLen + 1, 0, 0 );
+	if ( length <= 0 ) return "";
+
+    std::wstring wtemp( length, (wchar_t)( 0 ) );
+    MultiByteToWideChar( CP_UTF8, 0, utf8str.c_str(), srcLen + 1, &wtemp[ 0 ], length );
+    length = WideCharToMultiByte( CP_ACP, 0, &wtemp[ 0 ], -1, 0, 0, 0, 0 );
+    std::string temp(length, (char)( 0 ) );
+    WideCharToMultiByte( CP_ACP, 0, &wtemp[ 0 ], -1, &temp[ 0 ], length, 0, 0 );
+    return temp;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+/// @brief	convert ansi to utf8 string
+///
+/// @param	ansiStr	ansi string
+///
+/// @return	utf8 string
+////////////////////////////////////////////////////////////////////////////////////////////////////
+std::string ansi_to_utf8( const std::string& ansiStr )
+{
+	int srcLen = (int)( ansiStr.length() );
+    int length = MultiByteToWideChar( CP_ACP, 0, ansiStr.c_str(), srcLen + 1, 0, 0 );
+	if ( length <= 0 ) return "";
+
+    std::wstring wtemp( length, (wchar_t)( 0 ) );
+    MultiByteToWideChar( CP_ACP, 0, ansiStr.c_str(), srcLen + 1, &wtemp[ 0 ], length );
+    length = WideCharToMultiByte( CP_UTF8, 0, &wtemp[ 0 ], -1, 0, 0, 0, 0 );
+    std::string temp(length, (char)( 0 ) );
+    WideCharToMultiByte( CP_UTF8, 0, &wtemp[ 0 ], -1, &temp[ 0 ], length, 0, 0 );
+    return temp;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+/// @brief	run perforce command
+///
+/// @param	command		command to run
+/// @param	logFileName	if logFileName is assigned, returns a file pointer
+///						which contains the result of the command
+///
+/// @return	file pointer which contains the result of the command
+////////////////////////////////////////////////////////////////////////////////////////////////////
+FILE* p4( const std::string& command, const char* logFileName = "log.txt" )
+{
+	char buf[ 1024 * 100 ];
+
+	sprintf_s(
+		buf, sizeof( buf ) - 1,
+		"p4 -C %s -c %s -p %s:%d -u %s -P %s %s %s%s",
+		utf8Mode ? "utf8" : "cp949",
+		perforceWorkspace.c_str(),
+		perforceHost.c_str(),
+		perforcePort,
+		perforceUserId.c_str(),
+		perforceUserPw.c_str(),
+		command.c_str(),
+		logFileName ? "> " : "",
+		logFileName ? logFileName : "" );
+	system( buf );
+
+	if ( !logFileName ) return nullptr;
+
+	FILE* file = fopen( logFileName, "r" );
+	return file;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
 /// @brief	returns branch mapping between branch1 and branch2
 ///
 /// @param	branch1	first branch
@@ -50,19 +130,12 @@ enum class Mode
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 std::string GetBranchMapping( const std::string& branch1, const std::string& branch2, bool& reverse )
 {
-	char buf[ 256 ];
-	sprintf_s(
-		buf, sizeof( buf ) - 1,
-		"p4 -C cp949 -c %s -p %s:%d -u %s -P %s branches > log.txt",
-	perforceWorkspace.c_str(),
-	perforceHost.c_str(),
-	perforcePort,
-	perforceUserId.c_str(),
-	perforceUserPw.c_str() );
-	system( buf );
+	FILE* file = p4( "branches" );
+	ENSURE( file, return "invalid_branch" );
 
 	std::list< std::string > branchNameList;
-	FILE* file = fopen( "log.txt", "r" );
+
+	char buf[ 1024 * 100 ];
 	while ( fgets( buf, sizeof( buf ), file ) )
 	{
 		char* token = strtok( buf, " " );
@@ -89,12 +162,16 @@ std::string GetBranchMapping( const std::string& branch1, const std::string& bra
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 /// @brief	reads config
 ///
-/// @param	name		name of user
-/// @param	branchMap	map of branches
+/// @param	name				name of user
+/// @param	branchMap			map of branches
+/// @param	accountIgnoreMap	accounts to ignore
 ///
 /// @return	success or failure
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool read_config( std::string& name, std::unordered_map< std::string, std::string >& branchMap )
+bool read_config(
+	std::string&                                    name,
+	std::unordered_map< std::string, std::string >& branchMap,
+	AccountIgnoreSet&                               accountIgnoreSet )
 {
 	FILE* configFile = fopen( "config.txt", "r" );
 	if ( !configFile ) return false;
@@ -122,6 +199,11 @@ bool read_config( std::string& name, std::unordered_map< std::string, std::strin
 			std::string branchName = strtok( nullptr, " \t" );
 			std::string branchPath = strtok( nullptr, " \t\r\n" );
 			branchMap[ branchName ] = branchPath;
+		}
+		else if ( !strcmp( token, "account_to_ignore" ) )
+		{
+			std::string accountToIgnore = strtok( nullptr, " \t\r\n" );
+			accountIgnoreSet.insert( accountToIgnore );
 		}
 	}
 
@@ -164,10 +246,8 @@ void search()
 
 	std::string keyword = buf;
 
-	sprintf_s( buf, sizeof( buf ) - 1, "p4 -C cp949 changes -s submitted -l -m 3000 //depot/%s... > log.txt", folder.c_str() );
-	system( buf );
-
-	FILE* logFile = fopen( "log.txt", "r" );
+	sprintf_s( buf, sizeof( buf ) - 1, "changes -s submitted -l -m 3000 //depot/%s...", folder.c_str() );
+	FILE* logFile = p4( buf );
 	ENSURE( logFile, return );
 
 	int         readMode = 1;
@@ -256,18 +336,12 @@ void test_integration(
 	char buf[ 1024 * 10 ];
 	sprintf_s(
 		buf, sizeof( buf ) - 1,
-		"p4 -C cp949 -c %s -p %s:%d -u %s -P %s integrate %s-n -b \"%s\" -s //depot/%s/...@%d,@%d",
-		perforceWorkspace.c_str(),
-		perforceHost.c_str(),
-		perforcePort,
-		perforceUserId.c_str(),
-		perforceUserPw.c_str(),
+		"integrate %s-n -b \"%s\" -s //depot/%s/...@%d,@%d",
 		reverse ? "-r " : "",
 		branchMapping.c_str(),
 		branchMap[ srcBranch ].c_str(),
 		revision, revision );
-
-	system( buf );
+	p4( buf, nullptr );
 	system( "pause" );
 }
 
@@ -280,8 +354,10 @@ void test_integration(
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 std::string parse_submitter_name( char*& p )
 {
-	while ( *p != '[' ) p++;
-	++p;
+	while ( *p != '[' && *p ) p++;
+	if ( !*p ) return "";
+
+ 	++p;
 
 	char* start = p;
 	while ( *p != ']' ) p++;
@@ -305,7 +381,8 @@ void parse_branch_name( char* buf, char*& p, std::string& readBranch, std::strin
 	if ( *p != '[' )
 	{
 		readBranch = "Trunk";
-		srcBranch  = "Trunk";
+		if ( srcBranch == "None" )
+			srcBranch  = "Trunk";
 		return;
 	}
 
@@ -313,7 +390,8 @@ void parse_branch_name( char* buf, char*& p, std::string& readBranch, std::strin
 	if ( strstr( buf, "=>" ) )
 	{
 		while ( *p != '>' ) p++;
-		while ( *p != ' ' ) p++;
+		if ( *p == ' ' )
+			while ( *p != ' ' ) p++;
 		++p;
 	}
 	char* end = p;
@@ -358,56 +436,77 @@ void parse_tag( char* buf, char*& p, std::string& tag )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 /// @brief	perform merge
 ///
-/// @param	name		name
-/// @param	branchMap	map of branch
-/// @param	revision	number of revision
-/// @param	dstBranch	target branch
-/// @param	testMode	whether or not, it's test mode
-/// @param	autoSubmit	whether or not, automatically submit if there is no conflict
+/// @param	name					name
+/// @param	branchMap				map of branch
+/// @param	accountIgnoreSet		accounts to ignore
+/// @param	revision				number of revision
+/// @param	srcBranch				source branch
+/// @param	dstBranch				target branch
+/// @param	branchMapping			branch mapping to use when intergrating
+/// @param	branchMappingReserve	whether or not, direction of the branch mapping is reserve
+/// @param	testMode				whether or not, it's test mode
+/// @param	autoSubmit				whether or not, automatically submit if there is no conflict
 ///
 /// @return	result code
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int perform_merge(
-	const std::string& name,
-	      BranchMap&   branchMap,
-	      int          revision,
-	const std::string& dstBranch,
-	      bool         testMode,
-	      bool         autoSubmit )
+	const std::string&      name,
+	      BranchMap&        branchMap,
+	const AccountIgnoreSet& accountIgnoreSet,
+	      int               revision,
+	      std::string       srcBranch,
+	const std::string&      dstBranch,
+	      std::string       branchMapping,
+	      bool              branchMappingReverse,
+	      bool              testMode,
+	      bool              autoSubmit )
 {
-	std::string srcBranch = "None";
-
 	std::string personName;
 
 	char buf[ 1024 * 100 ];
-	sprintf_s( buf, sizeof( buf ) - 1, "p4 -C cp949 describe -s %d > log.txt", revision );
-	system( buf );
+	sprintf_s( buf, sizeof( buf ) - 1, "describe -s %d", revision );
 
-	FILE* logFile = fopen( "log.txt", "r" );
+	FILE* logFile = p4( buf );
 	ENSURE( logFile, return 1 );
 
-	while ( fgets( buf, sizeof( buf ) - 1, logFile ) )
+	bool srcBranchSpecified = !srcBranch.empty();
+	if ( !srcBranchSpecified )
 	{
-		if ( !strstr( buf, "... //depot/" ) ) continue;
-
-		for ( auto& pair : branchMap )
+		while ( fgets( buf, sizeof( buf ) - 1, logFile ) )
 		{
-			if ( strstr( buf, pair.second.c_str() ) )
+			if ( !strstr( buf, "... //depot/" ) ) continue;
+
+			for ( auto& pair : branchMap )
 			{
-				srcBranch = pair.first;
-				break;
+				if ( strstr( buf, pair.second.c_str() ) )
+				{
+					srcBranch = pair.first;
+					break;
+				}
 			}
+
+			break;
 		}
 
-		break;
+		ENSURE( !srcBranch.empty(), return 1 );
+		fclose( logFile );
+		logFile = fopen( "log.txt", "r" );
+		ENSURE( logFile, return 1 );
 	}
 
-	ENSURE( srcBranch != "None", return 1 );
-	fclose( logFile );
-	logFile = fopen( "log.txt", "r" );
-	ENSURE( logFile, return 1 );
-
 	ENSURE( fgets( buf, sizeof( buf ) - 1, logFile ), return 1 );
+	const char* token = " by ";
+	char* p = strstr( buf, token );
+	ENSURE( p, return 1 );
+	p = strtok( p + strlen( token ), "@" );
+	ENSURE( p, return 1 );
+	std::string submitterAccount = p;
+	if ( accountIgnoreSet.find( submitterAccount ) != accountIgnoreSet.end() )
+	{
+		fclose( logFile );
+		return 0;
+	}
+
 	ENSURE( fgets( buf, sizeof( buf ) - 1, logFile ), return 1 );
 
 	std::string srcComment;
@@ -433,14 +532,16 @@ int perform_merge(
 		{
 			char* p = buf;
 			personName = parse_submitter_name( p );
-			parse_branch_name( buf, p, readBranch, srcBranch );
+			if ( !personName.empty() )
+			{
+				parse_branch_name( buf, p, readBranch, srcBranch );
+				parse_tag( buf, p, tag );
 
-			parse_tag( buf, p, tag );
+				p = strtok( p, "\r\n" );
+				if ( !p || !*p ) continue;
 
-			p = strtok( p, "\r\n" );
-			if ( !p || !*p ) continue;
-
-			strcpy( buf, p );
+				strcpy( buf, p );
+			}
 		}
 
 		if ( !revisionCommentProcessed )
@@ -488,17 +589,27 @@ int perform_merge(
 
 	fclose( logFile );
 
-	printf( "old_comment : %s\n", comment.c_str() );
-	printf( "person      : %s\n", personName.c_str() );
-	printf( "src_branch  : %s\n", srcBranch.c_str() );
-	printf( "dst_branch  : %s\n", dstBranch.c_str() );
+// 	if ( utf8Mode )
+// 	{
+// 		srcComment = utf8_to_ansi( srcComment.c_str() );
+// 		comment    = utf8_to_ansi( comment.c_str() );
+// 		personName = utf8_to_ansi( personName.c_str() );
+// 		tag        = utf8_to_ansi( tag.c_str() );
+// 		for ( std::string& comment : commentList )
+// 			comment = utf8_to_ansi( comment.c_str() );
+// 	}
+
+	printf( "old_comment : %s\n", utf8Mode ? utf8_to_ansi( comment    ).c_str() : comment.c_str()    );
+	printf( "person      : %s\n", utf8Mode ? utf8_to_ansi( personName ).c_str() : personName.c_str() );
+	printf( "src_branch  : %s\n", utf8Mode ? utf8_to_ansi( srcBranch  ).c_str() : srcBranch.c_str()  );
+	printf( "dst_branch  : %s\n", utf8Mode ? utf8_to_ansi( dstBranch  ).c_str() : dstBranch.c_str()  );
 	
-	bool        reverse;
-	std::string branchMapping = GetBranchMapping( srcBranch, dstBranch, reverse );
+	if ( branchMapping.empty() )
+		branchMapping = GetBranchMapping( srcBranch, dstBranch, branchMappingReverse );
 
 	if ( testMode )
 	{
-		test_integration( reverse, branchMapping, branchMap, srcBranch, revision );
+		test_integration( branchMappingReverse, branchMapping, branchMap, srcBranch, revision );
 		return 0;
 	}
 
@@ -517,7 +628,7 @@ int perform_merge(
 		srcBranch.c_str(), dstBranch.c_str(), tagPart.c_str(),
 		revision, comment.c_str() );
 	std::string newComment = buf;
-	printf( "new_comment\n%s\n", newComment.c_str() );
+	printf( "new_comment\n%s\n", utf8Mode ? utf8_to_ansi( newComment ).c_str() : newComment.c_str() );
 
 	sprintf_s(
 		buf, sizeof( buf ) - 1,
@@ -527,7 +638,7 @@ int perform_merge(
 		"\t[%s][%s => %s]%s\r\n"
 		"\t- @%d %s",
 		srcComment.c_str(),
-		name.c_str(),
+		utf8Mode ? ansi_to_utf8( name ).c_str() : name.c_str(),
 		srcBranch.c_str(), dstBranch.c_str(), tagPart.c_str(),
 		revision, personName != name ? ("[" + personName + "]").c_str() : "" );
 
@@ -540,21 +651,23 @@ int perform_merge(
 		strcat_s( buf, sizeof( buf ) - 1, commentLine.c_str() );
 	}
 
-	SetClipboard( buf );
-	sprintf_s(
-		buf, sizeof( buf ) - 1,
-		"p4 -C cp949 -c %s -p %s:%d -u %s -P %s change > log.txt",
-		perforceWorkspace.c_str(),
-		perforceHost.c_str(),
-		perforcePort,
-		perforceUserId.c_str(),
-		perforceUserPw.c_str() );
-	system( buf );
+//	if ( autoSubmit )
+	{
+		FILE* inputFile = fopen( "input.txt", "w" );
+		fputs( buf, inputFile );
+		fclose( inputFile );
 
-	logFile = fopen( "log.txt", "r" );
+		logFile = p4( "change -i < input.txt" );
+	}
+// 	else
+// 	{
+// 		SetClipboard( utf8Mode ? utf8_to_ansi( buf ) : buf );
+// 		logFile = p4( "change" );
+// 	}
+
 	ENSURE( logFile, return 1 );
 	fgets( buf, sizeof( buf ) - 1, logFile );
-	char* p = buf;
+	p = buf;
 	while ( *p != ' ' ) ++p;
 	++p;
 
@@ -564,31 +677,20 @@ int perform_merge(
 
 	sprintf_s(
 		buf, sizeof( buf ) - 1,
-		"p4 -C cp949 -c %s -p %s:%d -u %s -P %s integrate -c %d %s-b \"%s\" -s //depot/%s/...@%d,@%d",
-		perforceWorkspace.c_str(),
-		perforceHost.c_str(),
-		perforcePort,
-		perforceUserId.c_str(),
-		perforceUserPw.c_str(),
+		"integrate -c %d %s-b \"%s\" -s //depot/%s/...@%d,@%d",
 		newChangeListNo,
-		reverse ? "-r " : "",
+		branchMappingReverse ? "-r " : "",
 		branchMapping.c_str(),
 		branchMap[ srcBranch ].c_str(),
 		revision, revision );
-	system( buf );
+	p4( buf, false );
 
 	sprintf_s(
 		buf, sizeof( buf ) - 1,
-		"p4 -C cp949 -c %s -p %s:%d -u %s -P %s change -o %d > log.txt",
-		perforceWorkspace.c_str(),
-		perforceHost.c_str(),
-		perforcePort,
-		perforceUserId.c_str(),
-		perforceUserPw.c_str(),
+		"change -o %d",
 		newChangeListNo );
-	system( buf );
 
-	logFile = fopen( "log.txt", "r" );
+	logFile = p4( buf );
 	ENSURE( logFile, return 1 );
 	while ( fgets( buf, sizeof( buf ) - 1, logFile ) )
 	{
@@ -598,26 +700,26 @@ int perform_merge(
 			break;
 	}
 
-	int autoResolveSuccessCount = 0;
-	int autoResolveFailedCount  = 0;
+	int  autoResolveSuccessCount = 0;
+	bool autoResolveFailed       = false;
+	std::list< std::string > fileList;
 	while ( fgets( buf, sizeof( buf ) - 1, logFile ) )
 	{
 		char* p = strtok( buf, "\t\r\n" );
 		if ( !p ) continue;
 
+		fileList.push_back( p );
+	}
+
+	for ( const std::string& filePath : fileList )
+	{
 		char command[ 256 ];
 		sprintf_s(
 			command, sizeof( command ) - 1,
-			"p4 -C cp949 -c %s -p %s:%d -u %s -P %s resolve -o -am %s > log_resolve.txt",
-			perforceWorkspace.c_str(),
-			perforceHost.c_str(),
-			perforcePort,
-			perforceUserId.c_str(),
-			perforceUserPw.c_str(),
-			p );
-		system( command );
+			"resolve -o -am %s",
+			filePath.c_str() );
 
-		FILE* reolveLogFile = fopen( "log_resolve.txt", "r" );
+		FILE* reolveLogFile = p4( command, "log_resolve.txt" );
 		ENSURE( reolveLogFile, return 1 );
 		bool autoResolved = true;
 		if ( fgets( buf, sizeof( buf ) - 1, reolveLogFile ) )
@@ -625,19 +727,57 @@ int perform_merge(
 			ENSURE( fgets( buf, sizeof( buf ) - 1, reolveLogFile ), return 1 );
 			autoResolved = (strstr( buf, "+ 0 conflicting" ) != nullptr);
 		}
-		printf( "autoResolved: %s-%s\n", p, autoResolved ? "success" : "failure" );
+		//printf( "autoResolved: %s-%s\n", p, autoResolved ? "success" : "failure" );
 		fclose( reolveLogFile );
 
 		if ( !autoResolved )
-			autoResolveFailedCount++;
+		{
+			autoResolveFailed = true;
+			break;
+		}
 		else
+		{
 			autoResolveSuccessCount++;
+		}
 	}
 
 	fclose( logFile );
 	
-	if ( autoResolveFailedCount )
+	if ( autoResolveFailed )
 	{
+		if ( autoSubmit )
+		{
+			printf( "conflicts! delete and continue?(y/n) " );
+			gets_s( buf );
+
+			if ( !strcmp( buf, "y" ) )
+			{
+				sprintf_s(
+					buf, sizeof( buf ) - 1,
+					"revert " );
+
+				int index = 0;
+				for ( const std::string& filePath : fileList )
+				{
+					if ( index++ > 0 )
+						strcat_s( buf, sizeof( buf ) - 1, " " );
+
+					strcat_s( buf, sizeof( buf ) - 1, filePath.c_str() );
+				}
+
+				p4( buf, nullptr );
+
+				// delete
+				sprintf_s(
+					buf, sizeof( buf ) - 1,
+					"change -d %d",
+					newChangeListNo );
+				p4( buf, nullptr );
+
+				return 0;
+			}
+		}
+
 		sprintf_s( buf, sizeof( buf ) - 1, "p4vc submit -c %d", newChangeListNo );
 		system( buf );
 		system( "pause" );
@@ -654,31 +794,21 @@ int perform_merge(
 
 	if ( !autoResolveSuccessCount )
 	{
-		// »èÁ¦
+		// delete
 		sprintf_s(
 			buf, sizeof( buf ) - 1,
-			"p4 -C cp949 -c %s -p %s:%d -u %s -P %s change -d %d",
-			perforceWorkspace.c_str(),
-			perforceHost.c_str(),
-			perforcePort,
-			perforceUserId.c_str(),
-			perforceUserPw.c_str(),
+			"change -d %d",
 			newChangeListNo );
-		system( buf );
+		p4( buf, nullptr );
 
 		return 0;
 	}
 
 	sprintf_s(
 		buf, sizeof( buf ) - 1,
-		"p4 -C cp949 -c %s -p %s:%d -u %s -P %s submit -c %d",
-		perforceWorkspace.c_str(),
-		perforceHost.c_str(),
-		perforcePort,
-		perforceUserId.c_str(),
-		perforceUserPw.c_str(),
+		"submit -c %d",
 		newChangeListNo );
-	system( buf );
+	p4( buf, nullptr );
 
 	return 0;
 }
@@ -686,12 +816,16 @@ int perform_merge(
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 /// @brief	perform merge
 ///
-/// @param	name		name
-/// @param	branchMap	map of branch
+/// @param	name				name
+/// @param	branchMap			map of branch
+/// @param	accountIgnoreSet	accounts to ignore
 ///
 /// @return	result code
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int perform_merge( const std::string& name, BranchMap& branchMap )
+int perform_merge(
+	const std::string&      name,
+	      BranchMap&        branchMap,
+	const AccountIgnoreSet& accountIgnoreSet )
 {
 	printf( "revision : " );
 
@@ -719,18 +853,22 @@ int perform_merge( const std::string& name, BranchMap& branchMap )
 	else
 		dstBranch = "JP_Dev";
 
-	return perform_merge( name, branchMap, revision, dstBranch, testMode, false );
+	return perform_merge( name, branchMap, accountIgnoreSet, revision, "", dstBranch, "", false, testMode, false );
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 /// @brief	perform bulk merge
 ///
-/// @param	name		name
-/// @param	branchMap	map of branch
+/// @param	name				name
+/// @param	branchMap			map of branch
+/// @param	accountIgnoreSet	accounts to ignore
 ///
 /// @return	result code
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int perform_bulk_merge( const std::string& name, BranchMap& branchMap )
+int perform_bulk_merge(
+	const std::string&      name,
+	      BranchMap&        branchMap,
+	const AccountIgnoreSet& accountIgnoreSet )
 {
 	printf( "first revision : " );
 
@@ -775,18 +913,12 @@ int perform_bulk_merge( const std::string& name, BranchMap& branchMap )
 
 	sprintf_s(
 		buf, sizeof( buf ) - 1,
-		"p4 -C cp949 -c %s -p %s:%d -u %s -P %s changes -t -l \"//depot/%s/%s...@>=%d\" > log.txt",
-		perforceWorkspace.c_str(),
-		perforceHost.c_str(),
-		perforcePort,
-		perforceUserId.c_str(),
-		perforceUserPw.c_str(),
+		"changes -t -l \"//depot/%s/%s...@>=%d\"",
 		branchFolder.c_str(),
 		subFolder.c_str(),
 		firstRevision );
-	system( buf );
 
-	FILE* logFile = fopen( "log.txt", "r" );
+	FILE* logFile = p4( buf, "log.txt" );
 	ENSURE( logFile, return 1 );
 
 	class RevisionInfo
@@ -845,10 +977,17 @@ int perform_bulk_merge( const std::string& name, BranchMap& branchMap )
 
 	fclose( logFile );
 
+// 	std::string branchMapping = "JP_Real_30W<=>JP_Real";
+	std::string branchMapping = "JP_Dev<=>JP_Real_35W";
+	bool        reverse       = true;
+
 	for ( auto iter = revisionList.rbegin(); iter != revisionList.rend(); iter++ )
 	{
 		const RevisionInfo& revisionInfo = *iter;
-		int result = perform_merge( name, branchMap, revisionInfo.num, dstBranch, testMode, true );
+		int result = perform_merge(
+			name, branchMap, accountIgnoreSet, revisionInfo.num,
+			srcBranch, dstBranch, branchMapping, reverse,
+			testMode, true );
 		if ( result ) return result;
 	}
 
@@ -864,10 +1003,11 @@ int perform_bulk_merge( const std::string& name, BranchMap& branchMap )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int main()
 {
-	std::string name;
-	BranchMap   branchMap;
+	std::string      name;
+	BranchMap        branchMap;
+	AccountIgnoreSet accountIgnoreSet;
 
-	if ( !read_config( name, branchMap ) ) return 1;
+	if ( !read_config( name, branchMap, accountIgnoreSet ) ) return 1;
 
 	char buf[ 1024 * 100 ];
 	printf( "mode(1: search, 2: merge, 3: bulk merge, 4: search&merge, 5: revision) : " );
@@ -889,12 +1029,12 @@ int main()
 	case Mode::Merge:
 		{
 			while ( true )
-				perform_merge( name, branchMap );
+				perform_merge( name, branchMap, accountIgnoreSet );
 		}
 		break;
 	case Mode::BulkMerge:
 		{
-			perform_bulk_merge( name, branchMap );
+			perform_bulk_merge( name, branchMap, accountIgnoreSet );
 		}
 		break;
 	case Mode::Revision:
@@ -904,5 +1044,7 @@ int main()
 		break;
 	}
 
-    return 0;
+	system( "pause" );
+
+	return 0;
 }
