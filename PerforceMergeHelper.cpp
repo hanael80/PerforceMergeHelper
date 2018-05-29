@@ -11,6 +11,9 @@
 #include <windows.h>
 
 
+#pragma warning( disable: 4503 )
+
+
 #define ENSURE( condition, doWhenFail )                                        \
 if ( !(condition) )                                                            \
 {                                                                              \
@@ -902,7 +905,15 @@ int perform_bulk_merge(
 	printf( "sub folder : " );
 	gets_s( buf );
 
-	std::string subFolder = buf;
+	std::list< std::string > subFolderList;
+	p = strtok( buf, ", " );
+	ENSURE( p, return  1 );
+	
+	do 
+	{
+		subFolderList.push_back( p );
+
+	} while ( p = strtok( nullptr, ", " ) );
 
 	auto iter = branchMap.find( srcBranch );
 	if ( iter == branchMap.end() )
@@ -912,16 +923,6 @@ int perform_bulk_merge(
 	}
 
 	const std::string& branchFolder = iter->second;
-
-	sprintf_s(
-		buf, sizeof( buf ) - 1,
-		"changes -t -l \"//depot/%s/%s...@>=%d\"",
-		branchFolder.c_str(),
-		subFolder.c_str(),
-		firstRevision );
-
-	FILE* logFile = p4( buf, "log.txt" );
-	ENSURE( logFile, return 1 );
 
 	class RevisionInfo
 	{
@@ -938,50 +939,63 @@ int perform_bulk_merge(
 		Comment, ///< ÁÖ¼®
 	};
 
-	ReadMode     readMode = ReadMode::Normal;
-	RevisionInfo curRevision;
+	std::map< int, RevisionInfo > revisionMap;
 
-	std::list< RevisionInfo > revisionList;
-
-	while ( fgets( buf, sizeof( buf ) - 1, logFile ) )
+	for ( const std::string& subFolder : subFolderList )
 	{
-		switch ( readMode )
-		{
-		case ReadMode::Normal:
-		{
-			char* token = strtok( buf, " " );
-			ENSURE( !strcmp( token, "Change" ), return 1 );
+		sprintf_s(
+			buf, sizeof( buf ) - 1,
+			"changes -t -l \"//depot/%s/%s...@>=%d\"",
+			branchFolder.c_str(),
+			subFolder.c_str(),
+			firstRevision );
 
-			token = strtok( nullptr, " " );
-			curRevision.num = atoi( token );
-			token = strtok( nullptr, " " );
-			token = strtok( nullptr, " " );
-			curRevision.date = token;
-			ENSURE( fgets( buf, sizeof( buf ) - 1, logFile ), return 1 );
-			readMode = ReadMode::Comment;
-			curRevision.comment = "";
-		}
-		break;
-		case ReadMode::Comment:
+		FILE* logFile = p4( buf, "log.txt" );
+		ENSURE( logFile, return 1 );
+
+		ReadMode     readMode = ReadMode::Normal;
+		RevisionInfo curRevision;
+
+		while ( fgets( buf, sizeof( buf ) - 1, logFile ) )
 		{
-			if ( *buf != '\t' )
+			switch ( readMode )
 			{
-				readMode = ReadMode::Normal;
-				revisionList.push_back( curRevision );
+			case ReadMode::Normal:
+				{
+					char* token = strtok( buf, " " );
+					ENSURE( !strcmp( token, "Change" ), return 1 );
+
+					token = strtok( nullptr, " " );
+					curRevision.num = atoi( token );
+					token = strtok( nullptr, " " );
+					token = strtok( nullptr, " " );
+					curRevision.date = token;
+					ENSURE( fgets( buf, sizeof( buf ) - 1, logFile ), return 1 );
+					readMode = ReadMode::Comment;
+					curRevision.comment = "";
+				}
+				break;
+			case ReadMode::Comment:
+				{
+					if ( *buf != '\t' )
+					{
+						readMode = ReadMode::Normal;
+						revisionMap[ curRevision.num ] = curRevision;
+						break;
+					}
+
+					curRevision.comment += buf;
+				}
 				break;
 			}
+		}
 
-			curRevision.comment += buf;
-		}
-		break;
-		}
+		fclose( logFile );
 	}
 
-	fclose( logFile );
-
-	for ( auto iter = revisionList.rbegin(); iter != revisionList.rend(); iter++ )
+	for ( auto& pair : revisionMap )
 	{
-		const RevisionInfo& revisionInfo = *iter;
+		const RevisionInfo& revisionInfo = pair.second;
 		int result = perform_merge(
 			name, branchMap, accountIgnoreSet, revisionInfo.num, 0,
 			srcBranch, dstBranch, branchMapping, reverse,
