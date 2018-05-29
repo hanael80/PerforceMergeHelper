@@ -213,23 +213,6 @@ bool read_config(
 	return true;
 }
 
-void SetClipboard( const std::string& s )
-{
-	HWND hwnd = GetDesktopWindow();
-	OpenClipboard( hwnd );
-	EmptyClipboard();
-	HGLOBAL hg = GlobalAlloc( GMEM_MOVEABLE, s.size() + 1 );
-	if ( !hg ) {
-		CloseClipboard();
-		return;
-	}
-	memcpy( GlobalLock( hg ), s.c_str(), s.size() + 1 );
-	GlobalUnlock( hg );
-	SetClipboardData( CF_TEXT, hg );
-	CloseClipboard();
-	GlobalFree( hg );
-}
-
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 /// @brief	searches revisions which contain a specific text
 ///
