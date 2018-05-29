@@ -48,6 +48,15 @@ enum class Mode
 	Max
 };
 
+class RevisionInfo
+{
+public:
+	int                      num;
+	std::string              date;
+	std::string              comment;
+	std::list< std::string > fileList;
+};
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 /// @brief	convert utf8 to ansi string
 ///
@@ -850,6 +859,84 @@ int perform_merge(
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+/// @brief	read revision info map
+///
+/// @param	branchFolder	folder name of target branch
+/// @param	firstRevision	first revision number
+/// @param	subFolderList	sub folder list
+/// @param	revisionMap		revision map
+///
+/// @return	result code
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int read_revision_map(
+	const std::string&                   branchFolder,
+	      int                            firstRevision,
+	const std::list< std::string >&      subFolderList,
+	      std::map< int, RevisionInfo >& revisionMap )
+{
+	enum class ReadMode
+	{
+		Normal,  ///< 老馆
+		Comment, ///< 林籍
+	};
+
+	char buf[ 1024 ];
+	for ( const std::string& subFolder : subFolderList )
+	{
+		sprintf_s(
+			buf, sizeof( buf ) - 1,
+			"changes -t -l \"//depot/%s/%s...@>=%d\"",
+			branchFolder.c_str(),
+			subFolder.c_str(),
+			firstRevision );
+
+		FILE* logFile = p4( buf, "log.txt" );
+		ENSURE( logFile, return 1 );
+
+		ReadMode     readMode = ReadMode::Normal;
+		RevisionInfo curRevision;
+
+		while ( fgets( buf, sizeof( buf ) - 1, logFile ) )
+		{
+			switch ( readMode )
+			{
+			case ReadMode::Normal:
+				{
+					char* token = strtok( buf, " " );
+					ENSURE( !strcmp( token, "Change" ), return 1 );
+
+					token = strtok( nullptr, " " );
+					curRevision.num = atoi( token );
+					token = strtok( nullptr, " " );
+					token = strtok( nullptr, " " );
+					curRevision.date = token;
+					ENSURE( fgets( buf, sizeof( buf ) - 1, logFile ), return 1 );
+					readMode = ReadMode::Comment;
+					curRevision.comment = "";
+				}
+				break;
+			case ReadMode::Comment:
+				{
+					if ( *buf != '\t' )
+					{
+						readMode = ReadMode::Normal;
+						revisionMap[ curRevision.num ] = curRevision;
+						break;
+					}
+
+					curRevision.comment += buf;
+				}
+				break;
+			}
+		}
+
+		fclose( logFile );
+	}
+
+	return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
 /// @brief	perform bulk merge
 ///
 /// @param	name				name
@@ -924,74 +1011,10 @@ int perform_bulk_merge(
 
 	const std::string& branchFolder = iter->second;
 
-	class RevisionInfo
-	{
-	public:
-		int                      num;
-		std::string              date;
-		std::string              comment;
-		std::list< std::string > fileList;
-	};
-
-	enum class ReadMode
-	{
-		Normal,  ///< 老馆
-		Comment, ///< 林籍
-	};
-
 	std::map< int, RevisionInfo > revisionMap;
 
-	for ( const std::string& subFolder : subFolderList )
-	{
-		sprintf_s(
-			buf, sizeof( buf ) - 1,
-			"changes -t -l \"//depot/%s/%s...@>=%d\"",
-			branchFolder.c_str(),
-			subFolder.c_str(),
-			firstRevision );
-
-		FILE* logFile = p4( buf, "log.txt" );
-		ENSURE( logFile, return 1 );
-
-		ReadMode     readMode = ReadMode::Normal;
-		RevisionInfo curRevision;
-
-		while ( fgets( buf, sizeof( buf ) - 1, logFile ) )
-		{
-			switch ( readMode )
-			{
-			case ReadMode::Normal:
-				{
-					char* token = strtok( buf, " " );
-					ENSURE( !strcmp( token, "Change" ), return 1 );
-
-					token = strtok( nullptr, " " );
-					curRevision.num = atoi( token );
-					token = strtok( nullptr, " " );
-					token = strtok( nullptr, " " );
-					curRevision.date = token;
-					ENSURE( fgets( buf, sizeof( buf ) - 1, logFile ), return 1 );
-					readMode = ReadMode::Comment;
-					curRevision.comment = "";
-				}
-				break;
-			case ReadMode::Comment:
-				{
-					if ( *buf != '\t' )
-					{
-						readMode = ReadMode::Normal;
-						revisionMap[ curRevision.num ] = curRevision;
-						break;
-					}
-
-					curRevision.comment += buf;
-				}
-				break;
-			}
-		}
-
-		fclose( logFile );
-	}
+	int result = read_revision_map( branchFolder, firstRevision, subFolderList, revisionMap );
+	if ( result ) return result;
 
 	for ( auto& pair : revisionMap )
 	{
