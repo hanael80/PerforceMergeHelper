@@ -558,7 +558,7 @@ int perform_merge(
 			if ( char* p = strstr( buf, "- #" ) )
 			{
 				p += 3;
-				while ( *p != ' ' ) p++;
+				while ( *p && *p != ' ' && *p != '\t' ) p++;
 				++p;
 				comment += p;
 				commentList.push_back( p );
@@ -566,7 +566,7 @@ int perform_merge(
 			else if ( char* p = strstr( buf, "- @" ) )
 			{
 				p += 3;
-				while ( *p != ' ' ) p++;
+				while ( *p && *p != ' ' && *p != '\t' ) p++;
 				++p;
 				comment += p;
 				commentList.push_back( p );
