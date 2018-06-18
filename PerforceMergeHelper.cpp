@@ -658,7 +658,7 @@ int perform_merge(
 			if ( lineIndex++ > 0 )
 				fprintf_s( inputFile, "\r\n\t" );
 
-			fprintf_s( inputFile, commentLine.c_str() );
+			fprintf_s( inputFile, "%s", commentLine.c_str() );
 		}
 
 		fclose( inputFile );
