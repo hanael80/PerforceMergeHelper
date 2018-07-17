@@ -821,41 +821,59 @@ int perform_merge(
 /// @param	name				name
 /// @param	branchMap			map of branch
 /// @param	accountIgnoreSet	accounts to ignore
+/// @param	changeListNum		number of changelist
+/// @param	targetBranchName	name of target branch
 ///
 /// @return	result code
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int perform_merge(
 	const std::string&      name,
 	      BranchMap&        branchMap,
-	const AccountIgnoreSet& accountIgnoreSet )
+	const AccountIgnoreSet& accountIgnoreSet,
+	      int               changeListNum,
+	      std::string       targetBranchName )
 {
 	printf( "revision : " );
 
 	char buf[ 1024 * 100 ];
-	gets_s( buf );
-
-	int  revision;
 	bool testMode = false;
-	if ( !strstr( buf, "/test" ) )
+
+	if ( changeListNum )
 	{
-		revision = atoi( buf );
+		printf( "%d\n", changeListNum );
 	}
 	else
 	{
-		revision = atoi( strtok( buf, "/ " ) );
-		testMode = true;
+		gets_s( buf );
+
+		if ( !strstr( buf, "/test" ) )
+		{
+			changeListNum = atoi( buf );
+		}
+		else
+		{
+			changeListNum = atoi( strtok( buf, "/ " ) );
+			testMode = true;
+		}
 	}
 
 	printf( "target branch(def: JP_Dev) : " );
-	gets_s( buf );
 
-	std::string dstBranch;
-	if ( *buf )
-		dstBranch = buf;
+	if ( !targetBranchName.empty() )
+	{
+		printf( "%s\n", targetBranchName.c_str() );
+	}
 	else
-		dstBranch = "JP_Dev";
+	{
+		gets_s( buf );
 
-	return perform_merge( name, branchMap, accountIgnoreSet, revision, 0, "", dstBranch, "", false, testMode, false );
+		if ( *buf )
+			targetBranchName = buf;
+		else
+			targetBranchName = "JP_Dev";
+	}
+
+	return perform_merge( name, branchMap, accountIgnoreSet, changeListNum, 0, "", targetBranchName, "", false, testMode, false );
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1037,25 +1055,43 @@ int perform_bulk_merge(
 /// @param	name				name
 /// @param	branchMap			map of branch
 /// @param	accountIgnoreSet	accounts to ignore
+/// @param	jobName				name of job
+/// @param	dstBranch			name of destination branch
+/// @param	unityChangeList		if true, only one change list would be created
 ///
 /// @return	result code
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int perform_merge_job(
 	const std::string&      name,
 	      BranchMap&        branchMap,
-	const AccountIgnoreSet& accountIgnoreSet )
+	const AccountIgnoreSet& accountIgnoreSet,
+	      std::string       jobName,
+	      std::string       dstBranch,
+	      bool              unityChangeList )
 {
-	printf( "job name : " );
-
 	char buf[ 1024 * 100 ];
-	gets_s( buf );
 
-	std::string jobName = buf;
+	printf( "job name : " );
+	if ( !jobName.empty() )
+	{
+		printf( "%s\n", jobName.c_str() );
+	}
+	else
+	{
+		gets_s( buf );
+		jobName = buf;
+	}
 
 	printf( "target branch : " );
-	gets_s( buf );
-
-	std::string dstBranch = buf;
+	if ( !dstBranch.empty() )
+	{
+		printf( "%s\n", dstBranch.c_str() );
+	}
+	else
+	{
+		gets_s( buf );
+		dstBranch = buf;
+	}
 
 	auto iter = branchMap.find( dstBranch );
 	if ( iter == branchMap.end() )
@@ -1064,27 +1100,31 @@ int perform_merge_job(
 		return 1;
 	}
 
-	sprintf_s(
-		buf, sizeof( buf ) - 1,
-		"Change: new\r\n\r\n"
-		"Description:\r\n"
-		"\t%s ¸ÓÂ¡\r\n",
-		jobName.c_str() );
+	int newChangeListNum = 0;
+	if ( unityChangeList )
+	{
+		sprintf_s(
+			buf, sizeof( buf ) - 1,
+			"Change: new\r\n\r\n"
+			"Description:\r\n"
+			"\t%s ¸ÓÂ¡\r\n",
+			jobName.c_str() );
 
-	FILE* inputFile = fopen( "input.txt", "w" );
-	fputs( utf8Mode ? ansi_to_utf8( buf ).c_str() : buf, inputFile );
-	fclose( inputFile );
+		FILE* inputFile = fopen( "input.txt", "w" );
+		fputs( utf8Mode ? ansi_to_utf8( buf ).c_str() : buf, inputFile );
+		fclose( inputFile );
 
-	FILE* logFile = p4( "change -i < input.txt" );
-	ENSURE( logFile, return 1 );
-	fgets( buf, sizeof( buf ) - 1, logFile );
-	char* p = buf;
-	while ( *p != ' ' ) ++p;
-	++p;
+		FILE* logFile = p4( "change -i < input.txt" );
+		ENSURE( logFile, return 1 );
+		fgets( buf, sizeof( buf ) - 1, logFile );
+		char* p = buf;
+		while ( *p != ' ' ) ++p;
+		++p;
 
-	int newChangeListNum = atoi( p );
-	printf( "newChangeList: %d\n", newChangeListNum );
-	fclose( logFile );
+		newChangeListNum = atoi( p );
+		printf( "newChangeList: %d\n", newChangeListNum );
+		fclose( logFile );
+	}
 
 	bool oldUtf8Mode = utf8Mode;
 	utf8Mode = false;
@@ -1093,7 +1133,7 @@ int perform_merge_job(
 		"fixes -j %s",
 		utf8Mode ? ansi_to_utf8( jobName ).c_str() : jobName.c_str() );
 
-	logFile = p4( buf, "log.txt" );
+	FILE* logFile = p4( buf, "log.txt" );
 	ENSURE( logFile, return 1 );
 
 	utf8Mode = oldUtf8Mode;
@@ -1112,12 +1152,16 @@ int perform_merge_job(
 		revisionNumSet.insert( atoi( revisionStr ) );
 	}
 
+	int count      = 0;
+	int totalCount = (int)( revisionNumSet.size() );
 	for ( int revisionNum : revisionNumSet )
 	{
 		int result = perform_merge(
 			name, branchMap, accountIgnoreSet, revisionNum, newChangeListNum,
 			"", dstBranch, "", false, false, true );
 		if ( result ) return result;
+
+		printf( "(%d/%d) %.1f%%\n", ++count, totalCount, count * 100.0 / totalCount );
 	}
 
 	printf( "OK!\n" );
@@ -1128,10 +1172,35 @@ int perform_merge_job(
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 /// @brief	main function
 ///
+/// @param	argc	argument count
+/// @param	argv	argument values
+///
 /// @return	exit code
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int main()
+int main( int argc, char* argv[] )
 {
+	Mode        mode = Mode::Max;
+	std::string jobName;
+	std::string branch;
+	bool        unityChangeList = true;
+	int         changeListNum   = 0;
+
+	for ( int i = 1; i < argc; i++ )
+	{
+		const char* arg = argv[ i ];
+		const char* token;
+		if ( strstr( arg, (token = "-mode:") ) )
+			mode = (Mode)( atoi( arg + strlen( token ) ) - 1 );
+		else if ( strstr( arg, (token = "-job:") ) )
+			jobName = arg + strlen( token );
+		else if ( strstr( arg, (token = "-branch:") ) )
+			branch = arg + strlen( token );
+		else if ( strstr( arg, (token = "-unity:") ) )
+			unityChangeList = atoi( arg + strlen( token ) ) != 0;
+		else if ( strstr( arg, (token = "-changelist:") ) )
+			changeListNum = atoi( arg + strlen( token ) );
+	}
+
 	std::string      name;
 	BranchMap        branchMap;
 	AccountIgnoreSet accountIgnoreSet;
@@ -1139,9 +1208,14 @@ int main()
 	if ( !read_config( name, branchMap, accountIgnoreSet ) ) return 1;
 
 	char buf[ 1024 * 100 ];
-	printf( "mode(1: search, 2: merge, 3: bulk merge, 4: merge job, 5: search&merge, 6: revision) : " );
-	gets_s( buf );
-	Mode mode = (Mode)( atoi( buf ) - 1 );
+
+	if ( mode == Mode::Max )
+	{
+		printf( "mode(1: search, 2: merge, 3: bulk merge, 4: merge job, 5: search&merge, 6: revision) : " );
+		gets_s( buf );
+		mode = (Mode)( atoi( buf ) - 1 );
+	}
+
 	switch ( mode )
 	{
 	case Mode::Search:
@@ -1157,8 +1231,14 @@ int main()
 		break;
 	case Mode::Merge:
 		{
+			if ( changeListNum )
+			{
+				perform_merge( name, branchMap, accountIgnoreSet, changeListNum, branch );
+				break;
+			}
+
 			while ( true )
-				perform_merge( name, branchMap, accountIgnoreSet );
+				perform_merge( name, branchMap, accountIgnoreSet, changeListNum, branch );
 		}
 		break;
 	case Mode::BulkMerge:
@@ -1168,7 +1248,7 @@ int main()
 		break;
 	case Mode::MergeJob:
 		{
-			perform_merge_job( name, branchMap, accountIgnoreSet );
+			perform_merge_job( name, branchMap, accountIgnoreSet, jobName, branch, unityChangeList );
 		}
 		break;
 	case Mode::Revision:
